@@ -1,0 +1,11 @@
+[package]
+name = "nettrace-packet"
+description = "Bounds-checked byte access, addresses, link types and timestamps"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

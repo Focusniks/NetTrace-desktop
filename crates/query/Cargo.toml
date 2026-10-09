@@ -1,0 +1,13 @@
+[package]
+name = "nettrace-query"
+description = "Display filter language: lexer, parser, typed compiler and evaluator"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+nettrace-model.workspace = true
+nettrace-packet.workspace = true
+
+[lints]
+workspace = true

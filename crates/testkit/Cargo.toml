@@ -1,0 +1,14 @@
+[package]
+name = "nettrace-testkit"
+description = "Packet builders and PCAP fixture generators for tests (not shipped)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+nettrace-packet.workspace = true
+nettrace-capture.workspace = true
+
+[lints]
+workspace = true

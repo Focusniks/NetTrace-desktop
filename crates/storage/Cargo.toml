@@ -1,0 +1,15 @@
+[package]
+name = "nettrace-storage"
+description = "Compact in-memory packet index and lazy random-access packet loading"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+nettrace-packet.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

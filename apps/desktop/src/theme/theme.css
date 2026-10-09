@@ -1,0 +1,68 @@
+/* Design tokens. Dark is the MVP theme; [data-theme="light"] is the hook for a
+   future light theme (only tokens change, components use variables). */
+:root {
+  color-scheme: dark;
+  --bg: #15181d;
+  --bg-elev: #1a1e25;
+  --bg-panel: #1c2028;
+  --bg-input: #12151a;
+  --bg-hover: #232935;
+  --bg-active: #2a3140;
+  --bg-header: #20252e;
+  --bg-selected: #234068;
+  --bg-selected-inactive: #2a3446;
+  --border: #2b313c;
+  --border-strong: #3a4250;
+  --text: #d5dae2;
+  --text-strong: #eef1f5;
+  --text-muted: #8a93a2;
+  --text-faint: #646c79;
+  --accent: #5aa2ff;
+  --accent-strong: #7ab4ff;
+  --accent-bg: #1d3352;
+  --ok: #4fb57c;
+  --ok-bg: #173225;
+  --warn: #e8a33d;
+  --warn-bg: #3a2b15;
+  --error: #e5605a;
+  --error-bg: #3b1d1d;
+  --note: #7aa7d9;
+  --hex-highlight: #3b5f94;
+  --hex-highlight-text: #ffffff;
+  --hex-related: #2c3a52;
+  --c2s: #5aa2ff;
+  --s2c: #4fb57c;
+  --chart-1: #5aa2ff;
+  --chart-2: #4fb57c;
+  --chart-3: #e8a33d;
+  --chart-4: #b08cf0;
+  --chart-5: #e5605a;
+  --chart-grid: #2b313c;
+
+  --font-ui: "Segoe UI", system-ui, -apple-system, "Inter", "Roboto", sans-serif;
+  --font-mono: "JetBrains Mono", "Cascadia Mono", "Consolas", "SF Mono", "Menlo", monospace;
+  --fs: 12px;
+  --fs-small: 11px;
+  --row-h: 20px;
+  --radius: 3px;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f4f5f7;
+  --bg-elev: #ffffff;
+  --bg-panel: #ffffff;
+  --bg-input: #ffffff;
+  --bg-hover: #eceff3;
+  --bg-active: #e2e6ec;
+  --bg-header: #eef0f3;
+  --bg-selected: #cfe0f7;
+  --bg-selected-inactive: #dfe5ee;
+  --border: #d6dae1;
+  --border-strong: #c3c9d2;
+  --text: #1f242c;
+  --text-strong: #0d1117;
+  --text-muted: #5b6472;
+  --text-faint: #8a93a2;
+  --accent: #1f6fd1;
+}

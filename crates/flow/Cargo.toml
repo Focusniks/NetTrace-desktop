@@ -1,0 +1,17 @@
+[package]
+name = "nettrace-flow"
+description = "TCP/UDP flow tracking and TCP sequence analysis"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+nettrace-model.workspace = true
+nettrace-packet.workspace = true
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+nettrace-protocol.workspace = true
+nettrace-testkit.workspace = true

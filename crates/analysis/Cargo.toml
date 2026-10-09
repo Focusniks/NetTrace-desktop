@@ -1,0 +1,15 @@
+[package]
+name = "nettrace-analysis"
+description = "Capture statistics: hosts, conversations, protocol hierarchy, I/O graph, timeline, technical indicators"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+nettrace-model.workspace = true
+nettrace-packet.workspace = true
+nettrace-flow.workspace = true
+nettrace-storage.workspace = true
+
+[lints]
+workspace = true

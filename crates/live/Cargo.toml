@@ -1,0 +1,21 @@
+[package]
+name = "nettrace-live"
+description = "Live packet capture through Npcap/libpcap, loaded at runtime (no SDK needed to build)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+nettrace-packet.workspace = true
+nettrace-model.workspace = true
+libloading = "0.8"
+thiserror.workspace = true
+
+# FFI to the capture library needs `unsafe` in one module (`ffi.rs`); everything
+# else keeps the workspace rule. `deny` (not `forbid`) so that module can opt in.
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"

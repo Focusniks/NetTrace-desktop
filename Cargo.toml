@@ -1,0 +1,72 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/model",
+    "crates/packet",
+    "crates/capture",
+    "crates/live",
+    "crates/protocol",
+    "crates/flow",
+    "crates/analysis",
+    "crates/storage",
+    "crates/query",
+    "crates/engine",
+    "crates/testkit",
+    "apps/desktop/src-tauri",
+    "tools/devbridge",
+]
+
+# `cargo build` at the root skips the dev-only bridge and the test kit.
+default-members = [
+    "crates/model",
+    "crates/packet",
+    "crates/capture",
+    "crates/live",
+    "crates/protocol",
+    "crates/flow",
+    "crates/analysis",
+    "crates/storage",
+    "crates/query",
+    "crates/engine",
+    "apps/desktop/src-tauri",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+rust-version = "1.80"
+
+[workspace.dependencies]
+nettrace-model = { path = "crates/model" }
+nettrace-packet = { path = "crates/packet" }
+nettrace-capture = { path = "crates/capture" }
+nettrace-live = { path = "crates/live" }
+nettrace-protocol = { path = "crates/protocol" }
+nettrace-flow = { path = "crates/flow" }
+nettrace-analysis = { path = "crates/analysis" }
+nettrace-storage = { path = "crates/storage" }
+nettrace-query = { path = "crates/query" }
+nettrace-engine = { path = "crates/engine" }
+nettrace-testkit = { path = "crates/testkit" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+parking_lot = "0.12"
+rayon = "1"
+tempfile = "3"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+lto = "thin"
+codegen-units = 4

@@ -1,0 +1,15 @@
+[package]
+name = "nettrace-model"
+description = "UI-facing domain model shared by backend and frontend (serde DTOs)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

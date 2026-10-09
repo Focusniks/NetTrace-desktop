@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "devbridge",
+      "runtimeExecutable": "cargo",
+      "runtimeArgs": ["run", "-q", "-p", "nettrace-devbridge"],
+      "port": 1421
+    },
+    {
+      "name": "ui",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "apps/desktop", "run", "dev"],
+      "port": 1420
+    }
+  ]
+}

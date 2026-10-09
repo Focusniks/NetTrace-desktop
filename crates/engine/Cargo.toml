@@ -1,0 +1,30 @@
+[package]
+name = "nettrace-engine"
+description = "Analysis session orchestration: background indexing, views, details, streams, statistics, search"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+nettrace-model.workspace = true
+nettrace-packet.workspace = true
+nettrace-capture.workspace = true
+nettrace-live.workspace = true
+nettrace-protocol.workspace = true
+nettrace-flow.workspace = true
+nettrace-analysis.workspace = true
+nettrace-storage.workspace = true
+nettrace-query.workspace = true
+parking_lot.workspace = true
+rayon.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+nettrace-packet.workspace = true
+nettrace-testkit.workspace = true
+tempfile.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

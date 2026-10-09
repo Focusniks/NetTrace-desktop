@@ -1,0 +1,12 @@
+/target
+/fixtures/large_*.pcap
+node_modules
+/apps/desktop/dist
+/apps/desktop/src-tauri/gen/schemas
+*.tsbuildinfo
+*.log
+# Update signing keys must never be committed.
+*.key
+*.key.pub
+.env
+.env.*

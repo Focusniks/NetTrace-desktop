@@ -1,0 +1,16 @@
+[package]
+name = "nettrace-protocol"
+description = "Protocol dissectors, dissector registry and the display-filter field registry"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+nettrace-model.workspace = true
+nettrace-packet.workspace = true
+
+[dev-dependencies]
+nettrace-testkit.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,19 @@
+[package]
+name = "nettrace-devbridge"
+description = "Development-only HTTP bridge exposing the engine to the UI running in a plain browser (127.0.0.1 only)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+nettrace-engine.workspace = true
+nettrace-model.workspace = true
+nettrace-live.workspace = true
+nettrace-capture.workspace = true
+nettrace-packet.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true

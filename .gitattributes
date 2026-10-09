@@ -8,3 +8,4 @@
 # NSIS reads these on Windows; keep them CRLF (and UTF-8 with BOM).
 *.nsh text eol=crlf
 apps/desktop/src-tauri/installer/LICENSE.txt text eol=crlf
+crates/engine/tests/golden/*.json -diff

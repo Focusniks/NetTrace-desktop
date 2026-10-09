@@ -63,6 +63,24 @@ pub struct ConversationRow {
     pub filter: String,
 }
 
+/// One page of the hosts table (sorted and filtered by the backend).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostPage {
+    pub total: u32,
+    pub offset: u32,
+    pub rows: Vec<HostRow>,
+}
+
+/// One page of a conversations table.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConversationPage {
+    pub total: u32,
+    pub offset: u32,
+    pub rows: Vec<ConversationRow>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProtocolNode {

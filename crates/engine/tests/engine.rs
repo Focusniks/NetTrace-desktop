@@ -2,7 +2,10 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use nettrace_engine::{Engine, FlowQuery, FlowSort, IoGraphRequest, SearchQuery, SearchRequest, SortKey, SortSpec, TimelineRequest};
+use nettrace_engine::{
+    ConversationQuery, ConversationSort, Engine, FlowQuery, FlowSort, HostQuery, HostSort, IoGraphRequest, SearchQuery, SearchRequest,
+    SortKey, SortSpec, TimelineRequest,
+};
 use nettrace_model::{ConversationKind, IndexState, IndicatorKind, StreamRef, TimelineKind, Transport};
 use nettrace_testkit::scenarios;
 
@@ -182,6 +185,11 @@ fn streams_and_sequence() {
 
     let seq = e.sequence(StreamRef { kind: Transport::Tcp, id: 0 }, 0, 100).unwrap();
     assert_eq!(seq.total as usize, seq.entries.len());
+    // Paging (forward, then jumping back) gives the same packets as one page.
+    let numbers = |off, lim| e.sequence(StreamRef { kind: Transport::Tcp, id: 0 }, off, lim).unwrap().entries.into_iter().map(|x| x.number);
+    let paged: Vec<u32> = (0..seq.total).step_by(5).flat_map(|o| numbers(o, 5)).collect();
+    assert_eq!(paged, seq.entries.iter().map(|x| x.number).collect::<Vec<_>>());
+    assert_eq!(numbers(2, 3).collect::<Vec<_>>(), seq.entries[2..5].iter().map(|x| x.number).collect::<Vec<_>>());
     assert_eq!(seq.entries[0].label, "SYN");
     assert_eq!(seq.entries[1].label, "SYN, ACK");
     assert_eq!(seq.entries[1].direction, nettrace_model::Direction::S2c);
@@ -195,18 +203,30 @@ fn streams_and_sequence() {
 #[test]
 fn statistics() {
     let (_f, e) = demo();
-    let hosts = e.hosts().unwrap();
-    let client = hosts.iter().find(|h| h.address == "10.10.1.15").unwrap();
+    let hq = |search: Option<&str>| HostQuery { sort: HostSort::Bytes, desc: true, offset: 0, limit: 1000, search: search.map(Into::into) };
+    let hosts = e.hosts_page(&hq(None)).unwrap();
+    assert_eq!(hosts.total as usize, hosts.rows.len());
+    assert!(hosts.rows.windows(2).all(|w| w[0].bytes >= w[1].bytes));
+    let found = e.hosts_page(&hq(Some("10.10.1.15"))).unwrap();
+    assert_eq!(found.total, 1);
+    let client = &found.rows[0];
     assert!(client.tx_packets > 0 && client.rx_packets > 0);
     assert_eq!(client.mac.as_deref(), Some("00:1f:1a:2b:3c:01"));
     assert!(client.protocols.iter().any(|p| p == "TLS"));
 
-    let tcp = e.conversations(ConversationKind::Tcp).unwrap();
-    assert_eq!(tcp.len(), 9);
-    assert!(tcp.iter().any(|c| c.state.as_deref() == Some("refused")));
-    assert!(!e.conversations(ConversationKind::Ip).unwrap().is_empty());
-    assert!(!e.conversations(ConversationKind::Eth).unwrap().is_empty());
-    assert_eq!(e.conversations(ConversationKind::Udp).unwrap().len(), e.summary().unwrap().udp_streams as usize);
+    let conv = |kind, offset, limit| {
+        e.conversations_page(&ConversationQuery { kind, sort: ConversationSort::Bytes, desc: true, offset, limit, search: None }).unwrap()
+    };
+    let tcp = conv(ConversationKind::Tcp, 0, 1000);
+    assert_eq!((tcp.total, tcp.rows.len()), (9, 9));
+    assert!(tcp.rows.iter().any(|c| c.state.as_deref() == Some("refused")));
+    // Pages concatenate to the full order.
+    let paged: Vec<_> = (0..9).step_by(4).flat_map(|o| conv(ConversationKind::Tcp, o, 4).rows).map(|r| r.filter).collect();
+    assert_eq!(paged, tcp.rows.iter().map(|r| r.filter.clone()).collect::<Vec<_>>());
+    assert!(conv(ConversationKind::Tcp, 50, 10).rows.is_empty());
+    assert!(conv(ConversationKind::Ip, 0, 10).total > 0);
+    assert!(conv(ConversationKind::Eth, 0, 10).total > 0);
+    assert_eq!(conv(ConversationKind::Udp, 0, 10).total, e.summary().unwrap().udp_streams);
 
     let h = e.protocol_hierarchy().unwrap();
     assert_eq!(h[0].filter, "frame");
@@ -227,6 +247,34 @@ fn statistics() {
     assert!(tl.events.iter().any(|ev| ev.kind == TimelineKind::TlsClientHello && ev.label == "api.example.com"));
     assert!(tl.events.iter().any(|ev| ev.kind == TimelineKind::HttpRequest));
     assert!(tl.tcp_active.iter().any(|n| *n > 0));
+}
+
+#[test]
+fn many_connections_counts_peers_and_ports() {
+    use nettrace_testkit::build::{self, tcpf, TcpSegment};
+    let mut cap = nettrace_testkit::Capture::ethernet();
+    let syn = |client: [u8; 4], server: [u8; 4], sport: u16, dport: u16| {
+        let seg = TcpSegment { sport, dport, seq: 1, ack: 0, flags: tcpf::SYN, window: 1024, options: vec![], payload: vec![] };
+        build::ethernet(build::MAC_B, build::MAC_A, build::ETH_IPV4, &build::ipv4(client, server, 6, 1, 64, &build::tcp(&seg)))
+    };
+    for i in 0..120u16 {
+        cap.push_after_us(10, syn([10, 9, 9, 9], [172, 16, 0, 1 + (i % 3) as u8], 40_000 + i, 1000 + i % 60));
+    }
+    cap.push_after_us(10, syn([10, 9, 9, 8], [172, 16, 0, 1], 40_000, 80));
+    let f = fixture("scan.pcap", cap.to_pcap());
+    let e = open(&f.path);
+    let busy: Vec<_> = e
+        .indicators()
+        .unwrap()
+        .into_iter()
+        .filter_map(|i| match i.kind {
+            IndicatorKind::ManyConnections { host, connections, distinct_peers, distinct_ports } => {
+                Some((host, connections, distinct_peers, distinct_ports, i.first_packet))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(busy, [("10.9.9.9".to_owned(), 120, 3, 60, Some(1))]);
 }
 
 #[test]

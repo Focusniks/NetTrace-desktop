@@ -126,6 +126,39 @@ export interface FlowQuery {
   search?: string | null;
 }
 
+export type HostSort = "address" | "mac" | "packets" | "bytes" | "tx" | "rx" | "first" | "last";
+
+export interface HostQuery {
+  sort: HostSort;
+  desc: boolean;
+  offset: number;
+  limit: number;
+  search?: string | null;
+}
+
+export interface HostPage {
+  total: number;
+  offset: number;
+  rows: HostRow[];
+}
+
+export type ConversationSort = "a" | "b" | "packets" | "bytes" | "ab" | "ba" | "start" | "duration" | "state";
+
+export interface ConversationQuery {
+  kind: ConversationKind;
+  sort: ConversationSort;
+  desc: boolean;
+  offset: number;
+  limit: number;
+  search?: string | null;
+}
+
+export interface ConversationPage {
+  total: number;
+  offset: number;
+  rows: ConversationRow[];
+}
+
 export interface SequenceEntry {
   number: number;
   timeRel: number;

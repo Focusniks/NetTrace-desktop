@@ -56,22 +56,25 @@ fn handshake_data_and_fin() {
     let tcp = flow.tcp.as_deref().unwrap();
     assert_eq!(flow.client, (nettrace_packet::Address::V4(CLIENT.ip), 52144));
     assert_eq!(flow.server.1, 80);
-    assert_eq!((tcp.syn, tcp.syn_ack, tcp.handshake_ack), (Some(0), Some(1), Some(2)));
-    assert_eq!(tcp.irtt_ns, Some(38_000_000));
-    assert_eq!(tcp.fin, [Some(6), Some(7)]);
+    assert_eq!((tcp.syn(), tcp.syn_ack(), tcp.handshake_ack()), (Some(0), Some(1), Some(2)));
+    assert_eq!(tcp.irtt_ns(), Some(38_000_000));
+    assert_eq!([tcp.fin(0), tcp.fin(1)], [Some(6), Some(7)]);
     assert_eq!(tcp.state(), TcpState::Closed);
     assert_eq!(tcp.retransmissions + tcp.duplicate_acks + tcp.out_of_order, 0);
     for p in 1..=9 {
         assert_eq!(flags(&a, p), 0, "packet {p} should have no analysis flags");
     }
-    assert_eq!(flow.packets, (0..9).collect::<Vec<u32>>());
+    // Packets form a chain in capture order through the assignments.
+    assert_eq!((flow.first_packet(), flow.last_packet(), flow.packet_count()), (0, 8, 9));
+    assert_eq!(a[0].unwrap().prev, None);
+    assert!((1..9).all(|i| a[i].unwrap().prev == Some(i as u32 - 1)));
     assert_eq!(flow.app, Some(nettrace_model::ProtocolId::Http));
     // Relative sequence numbering: SYN = 0, first data = 1.
     assert_eq!(tcp.dirs[0].base_seq.map(|b| b.wrapping_add(1)), Some(TcpConv::new(CLIENT, 52144, SERVER, 80).cseq.wrapping_add(1)));
     // RTT: response (pkt 5) acks request (pkt 4) after 20 ms.
-    let rtt = tcp.rtt_for(4).unwrap();
+    let rtt = table.rtt_for(4).unwrap();
     assert_eq!((rtt.acked, rtt.rtt_ns), (3, 20_000_000));
-    assert!(tcp.rtt_min_ns.is_some() && tcp.rtt_avg_ns().is_some());
+    assert!(tcp.rtt_min_ns().is_some() && tcp.rtt_avg_ns().is_some());
     let summary = flow.summary(scenarios::tcp_basic().frames[0].0.nanos());
     assert_eq!(summary.c2s_packets + summary.s2c_packets, 9);
     assert_eq!(summary.tcp.unwrap().handshake.syn, Some(1));
@@ -109,10 +112,8 @@ fn retransmission_ooo_dup_ack_fast_retrans_zero_window_rst() {
 #[test]
 fn retransmitted_segments_are_excluded_from_rtt() {
     let (table, _) = run(&scenarios::tcp_problems());
-    let (_, flow) = table.stream(Transport::Tcp, 0).unwrap();
-    let tcp = flow.tcp.as_deref().unwrap();
     // Packet 7 (index 6) acknowledges data#2 which was retransmitted: Karn's rule.
-    assert!(tcp.rtt_for(6).is_none());
+    assert!(table.rtt_for(6).is_none());
 }
 
 #[test]
@@ -199,7 +200,7 @@ fn udp_flows_and_direction() {
     let (table, a) = run(&cap);
     assert_eq!(table.udp_count(), 2);
     let (_, f0) = table.stream(Transport::Udp, 0).unwrap();
-    assert_eq!(f0.packets.len(), 2);
+    assert_eq!(f0.packet_count(), 2);
     assert_eq!(f0.server.1, 53);
     assert_eq!(f0.c2s.packets, 1);
     assert_eq!(f0.s2c.packets, 1);
@@ -223,4 +224,20 @@ fn demo_capture_streams() {
     assert_eq!(t.retransmissions, 5);
     assert_eq!(t.fast_retransmissions, 5);
     assert!(t.duplicate_acks >= 10);
+}
+
+#[test]
+fn finishing_keeps_the_results() {
+    let (mut table, _) = run(&scenarios::demo());
+    let before: Vec<_> = table.flows().iter().map(|f| format!("{:?}", f.summary(0))).collect();
+    table.finish();
+    let after: Vec<_> = table.flows().iter().map(|f| format!("{:?}", f.summary(0))).collect();
+    assert_eq!(before, after);
+}
+
+#[test]
+fn flow_results_stay_small() {
+    // Millions of flows are kept for the whole capture: guard their size.
+    assert!(std::mem::size_of::<nettrace_flow::Flow>() <= 128, "{}", std::mem::size_of::<nettrace_flow::Flow>());
+    assert!(std::mem::size_of::<nettrace_flow::TcpFlow>() <= 136, "{}", std::mem::size_of::<nettrace_flow::TcpFlow>());
 }

@@ -10,6 +10,7 @@ nettrace-model.workspace = true
 nettrace-packet.workspace = true
 nettrace-flow.workspace = true
 nettrace-storage.workspace = true
+hashbrown.workspace = true
 
 [lints]
 workspace = true

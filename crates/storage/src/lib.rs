@@ -6,11 +6,12 @@
 //! A persistent (e.g. SQLite) index can later replace [`PacketIndex`] without
 //! touching other layers.
 
-use std::collections::HashMap;
 use std::fs::File;
+use std::hash::BuildHasher;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use hashbrown::{DefaultHashBuilder, HashTable};
 use nettrace_packet::{Address, LinkType};
 
 /// Sentinel for "no value" in u32 id fields.
@@ -40,6 +41,9 @@ pub struct PacketMeta {
     pub l2_dst: u32,
     /// Index into the flow table, or [`NONE`].
     pub flow: u32,
+    /// Next packet of the same flow, or [`NONE`] (fits in padding: the
+    /// struct stays 64 bytes).
+    pub next_in_flow: u32,
     pub sport: u16,
     pub dport: u16,
     pub analysis: u16,
@@ -68,7 +72,9 @@ impl PacketMeta {
 #[derive(Debug, Default)]
 pub struct AddressTable {
     list: Vec<Address>,
-    map: HashMap<Address, u32>,
+    /// Ids by address; the address is read back from `list` (4 bytes per entry).
+    map: HashTable<u32>,
+    hasher: DefaultHashBuilder,
 }
 
 impl AddressTable {
@@ -76,13 +82,22 @@ impl AddressTable {
         if addr.is_none() {
             return NONE;
         }
-        if let Some(id) = self.map.get(&addr) {
-            return *id;
+        let hash = self.hasher.hash_one(addr);
+        let list = &self.list;
+        if let Some(&id) = self.map.find(hash, |&i| list[i as usize] == addr) {
+            return id;
         }
         let id = self.list.len() as u32;
         self.list.push(addr);
-        self.map.insert(addr, id);
+        let (list, hasher) = (&self.list, &self.hasher);
+        self.map.insert_unique(hash, id, |&i| hasher.hash_one(list[i as usize]));
         id
+    }
+
+    fn shrink_to_fit(&mut self) {
+        self.list.shrink_to_fit();
+        let (list, hasher) = (&self.list, &self.hasher);
+        self.map.shrink_to_fit(|&i| hasher.hash_one(list[i as usize]));
     }
 
     pub fn get(&self, id: u32) -> Address {
@@ -90,7 +105,8 @@ impl AddressTable {
     }
 
     pub fn id_of(&self, addr: &Address) -> Option<u32> {
-        self.map.get(addr).copied()
+        let list = &self.list;
+        self.map.find(self.hasher.hash_one(addr), |&i| list[i as usize] == *addr).copied()
     }
 
     pub fn len(&self) -> usize {
@@ -137,6 +153,19 @@ impl PacketIndex {
         self.packets.get(index as usize)
     }
 
+    /// Packets of a flow in capture order, following `next_in_flow` from `first`.
+    pub fn flow_packets(&self, first: u32) -> impl Iterator<Item = u32> + '_ {
+        std::iter::successors(self.get(first).map(|_| first), move |&i| {
+            self.get(i).map(|m| m.next_in_flow).filter(|&n| n != NONE)
+        })
+    }
+
+    /// Drops spare capacity once the capture is fully indexed.
+    pub fn shrink_to_fit(&mut self) {
+        self.packets.shrink_to_fit();
+        self.addrs.shrink_to_fit();
+    }
+
     pub fn get_mut(&mut self, index: u32) -> Option<&mut PacketMeta> {
         self.packets.get_mut(index as usize)
     }
@@ -160,7 +189,8 @@ impl PacketIndex {
     /// Approximate heap usage in bytes (for diagnostics).
     pub fn memory_bytes(&self) -> usize {
         self.packets.capacity() * std::mem::size_of::<PacketMeta>()
-            + self.addrs.list.capacity() * std::mem::size_of::<Address>() * 3
+            + self.addrs.list.capacity() * std::mem::size_of::<Address>()
+            + self.addrs.map.capacity() * (std::mem::size_of::<u32>() + 1)
     }
 }
 
@@ -280,6 +310,21 @@ mod tests {
     }
 
     #[test]
+    fn flow_packets_follow_the_chain() {
+        let mut idx = PacketIndex::new();
+        let m = |next| PacketMeta {
+            offset: 0, ts_ns: 0, caplen: 0, origlen: 0, protocols: 0, src: NONE, dst: NONE, l2_src: NONE, l2_dst: NONE,
+            flow: 0, next_in_flow: next, sport: 0, dport: 0, analysis: 0, tcp_flags: 0, interface: 0, top: 0, status: 0,
+        };
+        for next in [2, NONE, 3, NONE] {
+            idx.push(m(next));
+        }
+        assert_eq!(idx.flow_packets(0).collect::<Vec<_>>(), [0, 2, 3]);
+        assert_eq!(idx.flow_packets(1).collect::<Vec<_>>(), [1]);
+        assert_eq!(idx.flow_packets(9).count(), 0);
+    }
+
+    #[test]
     fn index_basics() {
         let mut idx = PacketIndex::new();
         let meta = PacketMeta {
@@ -293,6 +338,7 @@ mod tests {
             l2_src: NONE,
             l2_dst: NONE,
             flow: NONE,
+            next_in_flow: NONE,
             sport: 0,
             dport: 0,
             analysis: 0,

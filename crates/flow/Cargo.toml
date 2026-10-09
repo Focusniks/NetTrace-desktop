@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 nettrace-model.workspace = true
 nettrace-packet.workspace = true
+hashbrown.workspace = true
 
 [lints]
 workspace = true

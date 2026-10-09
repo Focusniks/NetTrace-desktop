@@ -15,6 +15,7 @@ mod rows;
 mod search;
 mod session;
 mod streams;
+mod tables;
 mod view;
 
 use std::path::Path;
@@ -27,9 +28,9 @@ use nettrace_capture::{CaptureReader, PacketSource};
 use nettrace_live::LiveSource;
 
 use nettrace_model::{
-    CaptureInfo, CaptureInterface, CaptureSummary, LiveOptions, ConversationKind, ConversationRow, FieldInfo, FilterError, FlowPage, FlowSummary,
-    HostRow, IndexProgress, Indicator, IoGraph, PacketDetail, PacketLengths, PacketRow, ProtocolNode,
-    SequencePage, StreamRef, Timeline, Transport, ViewInfo,
+    CaptureInfo, CaptureInterface, CaptureSummary, LiveOptions, ConversationPage, FieldInfo, FilterError, FlowPage, FlowSummary,
+    HostPage, IndexProgress, Indicator, IoGraph, PacketDetail, PacketLengths, PacketRow, ProtocolNode,
+    SequencePage, StreamRef, Timeline, ViewInfo,
 };
 use nettrace_query::Filter;
 use nettrace_storage::CaptureFile;
@@ -41,6 +42,7 @@ pub use indexer::ProgressFn;
 pub use search::{SearchHit, SearchQuery, SearchRequest};
 pub use session::Session;
 pub use streams::{FlowQuery, FlowSort};
+pub use tables::{ConversationQuery, ConversationSort, HostQuery, HostSort};
 pub use view::{SortKey, SortSpec};
 
 use crate::error::filter_error;
@@ -343,7 +345,8 @@ impl Engine {
     pub fn flows(&self, q: &FlowQuery) -> Result<FlowPage> {
         let s = self.session()?;
         let sh = s.data.read();
-        Ok(streams::list_flows(&sh, q))
+        let order = s.table_order(&streams::flows_key(q), sh.index.len(), || streams::flow_order(&sh, q));
+        Ok(streams::flow_page(&sh, &order, q))
     }
 
     pub fn flow(&self, stream: StreamRef) -> Result<FlowSummary> {
@@ -356,51 +359,32 @@ impl Engine {
     pub fn sequence(&self, stream: StreamRef, offset: u32, limit: u32) -> Result<SequencePage> {
         let s = self.session()?;
         let sh = s.data.read();
-        let (_, f) = sh.flows.stream(stream.kind, stream.id).ok_or_else(|| EngineError::not_found("stream"))?;
-        streams::sequence(&sh, &s.file, f, offset, limit)
-    }
-
-    pub fn hosts(&self) -> Result<Vec<HostRow>> {
-        let s = self.session()?;
-        let sh = s.data.read();
-        Ok(sh.acc.host_rows(sh.index.first_ts().unwrap_or(0)))
-    }
-
-    pub fn conversations(&self, kind: ConversationKind) -> Result<Vec<ConversationRow>> {
-        let s = self.session()?;
-        let sh = s.data.read();
-        let base = sh.index.first_ts().unwrap_or(0);
-        let transport = match kind {
-            ConversationKind::Tcp => Transport::Tcp,
-            ConversationKind::Udp => Transport::Udp,
-            other => return Ok(sh.acc.conversation_rows(other, base)),
+        let (fi, f) = sh.flows.stream(stream.kind, stream.id).ok_or_else(|| EngineError::not_found("stream"))?;
+        let from = match *s.seq_cursor.lock() {
+            Some((flow, at, packet)) if flow == fi && at <= offset => (at, packet),
+            _ => (0, f.first_packet()),
         };
-        let mut rows: Vec<ConversationRow> = sh
-            .flows
-            .flows()
-            .iter()
-            .filter(|f| f.transport == transport)
-            .map(|f| ConversationRow {
-                kind,
-                a: f.client.0.to_string(),
-                a_port: Some(f.client.1),
-                b: f.server.0.to_string(),
-                b_port: Some(f.server.1),
-                packets: f.packets.len() as u64,
-                bytes: f.total_bytes(),
-                a_to_b_packets: f.c2s.packets,
-                a_to_b_bytes: f.c2s.bytes,
-                b_to_a_packets: f.s2c.packets,
-                b_to_a_bytes: f.s2c.bytes,
-                start: f.first_ts_ns.saturating_sub(base) as f64 / 1e9,
-                duration: f.duration_ns() as f64 / 1e9,
-                state: f.tcp.as_deref().map(|t| tcp_state_code(t.state()).to_owned()),
-                stream: Some(StreamRef { kind: f.transport, id: f.stream_id }),
-                filter: f.filter(),
-            })
-            .collect();
-        rows.sort_by_key(|r| std::cmp::Reverse(r.bytes));
-        Ok(rows)
+        let (page, last) = streams::sequence(&sh, &s.file, f, offset, limit, from)?;
+        if let Some((at, packet)) = last {
+            *s.seq_cursor.lock() = Some((fi, at, packet));
+        }
+        Ok(page)
+    }
+
+    /// One page of the hosts table, sorted and filtered by `q`.
+    pub fn hosts_page(&self, q: &HostQuery) -> Result<HostPage> {
+        let s = self.session()?;
+        let sh = s.data.read();
+        let order = s.table_order(&tables::hosts_key(q), sh.index.len(), || tables::host_order(&sh, q));
+        Ok(tables::host_page(&sh, &order, q))
+    }
+
+    /// One page of a conversations table (Ethernet, IP, TCP or UDP).
+    pub fn conversations_page(&self, q: &ConversationQuery) -> Result<ConversationPage> {
+        let s = self.session()?;
+        let sh = s.data.read();
+        let order = s.table_order(&tables::conversations_key(q), sh.index.len(), || tables::conversation_order(&sh, q));
+        Ok(tables::conversation_page(&sh, &order, q))
     }
 
     pub fn protocol_hierarchy(&self) -> Result<Vec<ProtocolNode>> {
@@ -466,7 +450,7 @@ impl Engine {
     pub fn indicators(&self) -> Result<Vec<Indicator>> {
         let s = self.session()?;
         let sh = s.data.read();
-        Ok(nettrace_analysis::indicators(&sh.flows, &sh.acc, &IndicatorConfig::default()))
+        Ok(nettrace_analysis::indicators(&sh.flows, &sh.acc, &sh.index.addrs, &IndicatorConfig::default()))
     }
 
     pub fn search(&self, req: &SearchRequest) -> Result<Option<SearchHit>> {
@@ -491,21 +475,6 @@ impl Engine {
         }
         let sh = s.data.read();
         export::write(&sh, &s.file, &v, path)
-    }
-}
-
-/// `TcpState` as its serde string (snake_case).
-fn tcp_state_code(state: nettrace_model::TcpState) -> &'static str {
-    use nettrace_model::TcpState::*;
-    match state {
-        SynSent => "syn_sent",
-        SynReceived => "syn_received",
-        Established => "established",
-        Midstream => "midstream",
-        Closing => "closing",
-        Closed => "closed",
-        Reset => "reset",
-        Refused => "refused",
     }
 }
 

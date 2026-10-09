@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
-import { computeWindow } from "../../lib/virtual";
+import { computeWindow, scrollTopForRow } from "../../lib/virtual";
 
 export interface VColumn<T> {
   id: string;
@@ -11,12 +11,26 @@ export interface VColumn<T> {
   render: (row: T) => ReactNode;
   /** Enables client-side sorting by this value. */
   sortValue?: (row: T) => number | string;
+  /** With server-side sorting (`onSortChange`): the backend can sort by this column. */
+  sortable?: boolean;
   title_attr?: (row: T) => string;
+}
+
+/** Rows loaded on demand (backend paging): `get` returns undefined until loaded. */
+export interface RowSource<T> {
+  /** Identity of the query: a new one restarts keyboard navigation. */
+  key: string;
+  total: number;
+  get: (index: number) => T | undefined;
+  ensure: (first: number, count: number) => void;
 }
 
 interface Props<T> {
   columns: VColumn<T>[];
-  rows: T[];
+  /** All rows (sorted here unless `onSortChange` is given)… */
+  rows?: T[];
+  /** …or rows paged from the backend (sorting is then the backend's). */
+  source?: RowSource<T>;
   rowKey: (row: T) => string;
   selectedKey?: string | null;
   onSelect?: (row: T) => void;
@@ -38,6 +52,10 @@ export function VirtualTable<T>(p: Props<T>) {
   const [viewport, setViewport] = useState(400);
   const [localSort, setLocalSort] = useState(p.initialSort ?? null);
   const sort = p.onSortChange ? (p.sort ?? null) : localSort;
+  /** Keyboard position in paged mode (rows there are not all known). */
+  const [cursor, setCursor] = useState(-1);
+  /** Row moved to with the keyboard before it was loaded; selected on arrival. */
+  const pendingSelect = useRef<number | null>(null);
 
   useEffect(() => {
     const el = bodyRef.current;
@@ -48,11 +66,12 @@ export function VirtualTable<T>(p: Props<T>) {
   }, []);
 
   const sorted = useMemo(() => {
-    if (p.onSortChange || !sort) return p.rows;
+    const rows = p.rows ?? [];
+    if (p.onSortChange || !sort) return rows;
     const col = p.columns.find((c) => c.id === sort.id);
-    if (!col?.sortValue) return p.rows;
+    if (!col?.sortValue) return rows;
     const val = col.sortValue;
-    const out = [...p.rows].sort((a, b) => {
+    const out = [...rows].sort((a, b) => {
       const x = val(a);
       const y = val(b);
       const c = typeof x === "number" && typeof y === "number" ? x - y : String(x).localeCompare(String(y), "ru");
@@ -61,11 +80,47 @@ export function VirtualTable<T>(p: Props<T>) {
     return out;
   }, [p.rows, p.columns, sort, p.onSortChange]);
 
-  const w = computeWindow(sorted.length, rowHeight, viewport, scrollTop);
+  const source = p.source;
+  const count = source ? source.total : sorted.length;
+  const rowAt = (i: number): T | undefined => (source ? source.get(i) : sorted[i]);
+  const w = computeWindow(count, rowHeight, viewport, scrollTop);
+  useEffect(() => {
+    if (w.count > 0) source?.ensure(w.first, w.count);
+    const pending = pendingSelect.current;
+    const row = pending == null ? undefined : rowAt(pending);
+    if (row !== undefined) {
+      pendingSelect.current = null;
+      p.onSelect?.(row);
+    }
+  });
+  // Another order or filter: positions no longer mean the same rows.
+  const sourceKey = source?.key;
+  useEffect(() => {
+    setCursor(-1);
+    pendingSelect.current = null;
+  }, [sourceKey]);
+  /** Index of the selected row: the cursor if it still shows it, else found among loaded rows. */
+  const selectedIndex = (): number => {
+    if (!source) return p.selectedKey == null ? -1 : sorted.findIndex((r) => p.rowKey(r) === p.selectedKey);
+    const at = (i: number) => {
+      const r = rowAt(i);
+      return r !== undefined && p.rowKey(r) === p.selectedKey;
+    };
+    if (p.selectedKey == null) return cursor;
+    if (cursor >= 0 && at(cursor)) return cursor;
+    for (let i = w.first; i < w.first + w.count; i++) if (at(i)) return i;
+    return cursor;
+  };
+  const sortable = (c: VColumn<T>) => (p.onSortChange ? !!c.sortable : !!c.sortValue);
+  const select = (row: T, index: number) => {
+    pendingSelect.current = null;
+    setCursor(index);
+    p.onSelect?.(row);
+  };
   const totalWidth = p.columns.reduce((s, c) => s + c.width, 0);
 
   const clickHeader = (c: VColumn<T>) => {
-    if (!c.sortValue && !p.onSortChange) return;
+    if (!sortable(c)) return;
     const desc = sort?.id === c.id ? !sort.desc : c.align === "right";
     if (p.onSortChange) p.onSortChange(c.id, desc);
     else setLocalSort({ id: c.id, desc });
@@ -87,7 +142,7 @@ export function VirtualTable<T>(p: Props<T>) {
               }
             }}
             role="columnheader"
-            tabIndex={c.sortValue || p.onSortChange ? 0 : -1}
+            tabIndex={sortable(c) ? 0 : -1}
             aria-sort={sort?.id === c.id ? (sort.desc ? "descending" : "ascending") : undefined}
             title={c.title}
           >
@@ -101,30 +156,30 @@ export function VirtualTable<T>(p: Props<T>) {
         className="plist-body"
         tabIndex={0}
         role="grid"
-        aria-rowcount={sorted.length}
+        aria-rowcount={count}
         onKeyDown={(e) => {
-          if (!sorted.length) return;
-          const idx = p.selectedKey == null ? -1 : sorted.findIndex((r) => p.rowKey(r) === p.selectedKey);
+          if (!count) return;
+          const idx = selectedIndex();
           const page = Math.max(1, Math.floor(viewport / rowHeight) - 1);
           const moves: Record<string, number> = { ArrowDown: 1, ArrowUp: -1, PageDown: page, PageUp: -page };
           let next: number | null = null;
-          if (e.key in moves) next = Math.min(sorted.length - 1, Math.max(0, idx + moves[e.key]));
+          if (e.key in moves) next = Math.min(count - 1, Math.max(0, idx + moves[e.key]));
           else if (e.key === "Home") next = 0;
-          else if (e.key === "End") next = sorted.length - 1;
+          else if (e.key === "End") next = count - 1;
           else if (e.key === "Enter" && idx >= 0) {
             e.preventDefault();
-            p.onActivate?.(sorted[idx]);
+            const row = rowAt(idx);
+            if (row) p.onActivate?.(row);
             return;
           }
           if (next == null) return;
           e.preventDefault();
-          p.onSelect?.(sorted[next]);
+          setCursor(next);
+          const row = rowAt(next);
+          pendingSelect.current = row === undefined ? next : null;
+          if (row !== undefined) p.onSelect?.(row);
           const el = bodyRef.current;
-          if (el) {
-            const y = next * rowHeight;
-            if (y < el.scrollTop) el.scrollTop = y;
-            else if (y + rowHeight > el.scrollTop + el.clientHeight) el.scrollTop = y + rowHeight - el.clientHeight;
-          }
+          if (el) el.scrollTop = scrollTopForRow(next, count, rowHeight, el.clientHeight, el.scrollTop, true);
         }}
         onScroll={(e) => {
           setScrollTop(e.currentTarget.scrollTop);
@@ -134,7 +189,15 @@ export function VirtualTable<T>(p: Props<T>) {
       >
         <div style={{ height: w.contentHeight, width: totalWidth, position: "relative" }}>
           <div className="plist-rows" style={{ transform: `translateY(${w.offsetY}px)` }}>
-            {sorted.slice(w.first, w.first + w.count).map((row) => {
+            {Array.from({ length: w.count }, (_, k) => w.first + k).map((index) => {
+              const row = rowAt(index);
+              if (row === undefined) {
+                return (
+                  <div key={`loading-${index}`} role="row" className="plist-row is-loading">
+                    <div className="plist-cell faint">…</div>
+                  </div>
+                );
+              }
               const key = p.rowKey(row);
               return (
                 <div
@@ -142,7 +205,7 @@ export function VirtualTable<T>(p: Props<T>) {
                   role="row"
                   aria-selected={p.selectedKey === key}
                   className={`plist-row${p.selectedKey === key ? " is-selected" : ""}`}
-                  onClick={() => p.onSelect?.(row)}
+                  onClick={() => select(row, index)}
                   onDoubleClick={() => p.onActivate?.(row)}
                   onContextMenu={(e) => p.onContextMenu?.(e, row)}
                 >
@@ -161,7 +224,7 @@ export function VirtualTable<T>(p: Props<T>) {
             })}
           </div>
         </div>
-        {sorted.length === 0 && p.emptyText ? <div className="plist-empty">{p.emptyText}</div> : null}
+        {count === 0 && p.emptyText ? <div className="plist-empty">{p.emptyText}</div> : null}
       </div>
     </div>
   );

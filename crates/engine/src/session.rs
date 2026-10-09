@@ -24,6 +24,15 @@ pub struct Shared {
 }
 
 const MAX_VIEWS: usize = 16;
+/// Sorted row orders of the statistics tables kept for paging (one per
+/// visible table; each can hold millions of ids).
+const MAX_TABLE_ORDERS: usize = 2;
+/// While packets keep arriving, an order this young is reused instead of
+/// sorting everything again for every page.
+const ORDER_FRESH: Duration = Duration::from_secs(1);
+
+/// A sorted table order: query key, packets indexed when computed, when, row ids.
+type TableOrder = (String, u32, Instant, Arc<[u32]>);
 
 /// One open capture file.
 pub struct Session {
@@ -40,6 +49,14 @@ pub struct Session {
     pub(crate) job_gen: AtomicU64,
     /// Same for searches, so a search never cancels a view and vice versa.
     pub(crate) search_gen: AtomicU64,
+    /// Recently sorted table orders (hosts, conversations, streams), so that
+    /// scrolling through pages does not sort again. Keyed by the query and
+    /// the number of packets indexed when it was computed.
+    table_orders: Mutex<Vec<TableOrder>>,
+    /// Where the last sequence page of a flow ended: (flow, offset, packet),
+    /// so the next page continues the packet chain instead of walking it
+    /// from the first packet.
+    pub(crate) seq_cursor: Mutex<Option<(u32, u32, u32)>>,
     pub(crate) started: Instant,
     /// Present for live captures.
     pub(crate) live: Option<LiveHandle>,
@@ -78,6 +95,8 @@ impl Session {
             next_view: AtomicU64::new(1),
             job_gen: AtomicU64::new(0),
             search_gen: AtomicU64::new(0),
+            table_orders: Mutex::new(Vec::new()),
+            seq_cursor: Mutex::new(None),
             started: Instant::now(),
             live,
             _temp: temp,
@@ -119,6 +138,27 @@ impl Session {
     /// True while a live capture of this session is still recording.
     pub fn capturing(&self) -> bool {
         self.live.as_ref().is_some_and(LiveHandle::running)
+    }
+
+    /// Row order for `key` at `version` (packets indexed), computed by `make`
+    /// when not cached. While indexing, an order younger than [`ORDER_FRESH`]
+    /// is reused although packets arrived since; afterwards only an exact one.
+    pub(crate) fn table_order(&self, key: &str, version: u32, make: impl FnOnce() -> Vec<u32>) -> Arc<[u32]> {
+        let indexing = self.is_indexing();
+        let cached = self.table_orders.lock().iter().find_map(|(k, v, at, order)| {
+            (k == key && (*v == version || (indexing && at.elapsed() < ORDER_FRESH))).then(|| order.clone())
+        });
+        if let Some(order) = cached {
+            return order;
+        }
+        let order: Arc<[u32]> = make().into();
+        let mut cache = self.table_orders.lock();
+        cache.retain(|(k, ..)| k != key);
+        if cache.len() >= MAX_TABLE_ORDERS {
+            cache.remove(0);
+        }
+        cache.push((key.to_owned(), version, Instant::now(), order.clone()));
+        order
     }
 
     pub(crate) fn add_view(&self, mut view: View) -> Arc<View> {

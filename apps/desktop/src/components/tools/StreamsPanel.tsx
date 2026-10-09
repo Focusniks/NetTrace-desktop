@@ -10,25 +10,27 @@ import { showContextMenu } from "../common/ContextMenu";
 import { Icon } from "../common/Icon";
 import { VirtualTable, type VColumn } from "../common/VirtualTable";
 import { QueryError, useBackend } from "./useBackend";
+import { useDebounced, usePagedTable } from "./usePagedTable";
 
 const COLS: (VColumn<FlowSummary> & { sort?: FlowSort })[] = [
-  { id: "id", sort: "id", title: t("streams.col.id"), width: 70, align: "right", mono: true, render: (f) => `${f.kind} ${f.id}` },
+  { id: "id", sortable: true, sort: "id", title: t("streams.col.id"), width: 70, align: "right", mono: true, render: (f) => `${f.kind} ${f.id}` },
   { id: "client", title: t("streams.col.client"), width: 170, mono: true, render: (f) => fmtEndpoint(f.client.addr, f.client.port) },
   { id: "server", title: t("streams.col.server"), width: 170, mono: true, render: (f) => fmtEndpoint(f.server.addr, f.server.port) },
   { id: "proto", title: t("streams.col.protocol"), width: 64, render: (f) => f.protocol },
-  { id: "packets", sort: "packets", title: t("streams.col.packets"), width: 70, align: "right", render: (f) => fmtInt(f.packets) },
-  { id: "bytes", sort: "bytes", title: t("streams.col.bytes"), width: 84, align: "right", render: (f) => fmtBytes(f.bytes) },
-  { id: "start", sort: "start", title: t("streams.col.start"), width: 84, align: "right", mono: true, render: (f) => f.start.toFixed(3) },
-  { id: "duration", sort: "duration", title: t("streams.col.duration"), width: 90, align: "right", render: (f) => fmtDuration(f.duration) },
+  { id: "packets", sortable: true, sort: "packets", title: t("streams.col.packets"), width: 70, align: "right", render: (f) => fmtInt(f.packets) },
+  { id: "bytes", sortable: true, sort: "bytes", title: t("streams.col.bytes"), width: 84, align: "right", render: (f) => fmtBytes(f.bytes) },
+  { id: "start", sortable: true, sort: "start", title: t("streams.col.start"), width: 84, align: "right", mono: true, render: (f) => f.start.toFixed(3) },
+  { id: "duration", sortable: true, sort: "duration", title: t("streams.col.duration"), width: 90, align: "right", render: (f) => fmtDuration(f.duration) },
   {
     id: "retrans",
+    sortable: true,
     sort: "retransmissions",
     title: t("streams.col.retrans"),
     width: 56,
     align: "right",
     render: (f) => (f.tcp && f.tcp.retransmissions > 0 ? <span style={{ color: "var(--warn)" }}>{f.tcp.retransmissions}</span> : f.tcp ? "0" : ""),
   },
-  { id: "rtt", sort: "rtt", title: t("streams.col.rtt"), width: 76, align: "right", render: (f) => (f.tcp ? fmtMs(f.tcp.rttAvgMs ?? f.tcp.irttMs) : "") },
+  { id: "rtt", sortable: true, sort: "rtt", title: t("streams.col.rtt"), width: 76, align: "right", render: (f) => (f.tcp ? fmtMs(f.tcp.rttAvgMs ?? f.tcp.irttMs) : "") },
   { id: "state", title: t("streams.col.state"), width: 150, render: (f) => (f.tcp ? t(`state.${f.tcp.state}` as MessageKey) : "") },
 ];
 
@@ -38,10 +40,11 @@ export function StreamsPanel() {
   const [sort, setSort] = useState<{ id: string; desc: boolean }>({ id: "id", desc: false });
   const focus = useStore((s) => s.focusStream);
   const flowSort = (COLS.find((c) => c.id === sort.id)?.sort ?? "id") as FlowSort;
-
-  const { data, error, reload } = useBackend(
-    () => api.flows({ kind, sort: flowSort, desc: sort.desc, offset: 0, limit: 5000, search: search || null }),
-    [kind, flowSort, sort.desc, search],
+  const query = useDebounced(search.trim());
+  const table = usePagedTable(`${kind}|${flowSort}|${sort.desc}|${query}`, (offset, limit) =>
+    api
+      .flows({ kind, sort: flowSort, desc: sort.desc, offset, limit, search: query || null })
+      .then((p) => ({ total: p.total, rows: p.flows })),
   );
 
   const selectedKey = focus ? `${focus.kind}:${focus.id}` : null;
@@ -57,16 +60,16 @@ export function StreamsPanel() {
           ))}
         </div>
         <input spellCheck={false} autoComplete="off" className="input grow" placeholder={t("streams.search")} value={search} onChange={(e) => setSearch(e.target.value)} />
-        <span className="muted">{data ? `${fmtInt(data.flows.length)} / ${fmtInt(data.total)}` : ""}</span>
-        <button className="icon-btn" title={t("common.refresh")} onClick={reload}>
+        <span className="muted">{table.loaded ? fmtInt(table.total) : ""}</span>
+        <button className="icon-btn" title={t("common.refresh")} onClick={table.reload}>
           <Icon name="refresh" />
         </button>
       </div>
-      <QueryError error={error} />
+      <QueryError error={table.error} />
       <div className="tool-body" style={{ overflow: "hidden" }}>
         <VirtualTable
           columns={COLS}
-          rows={data?.flows ?? []}
+          source={table}
           rowKey={(f) => `${f.kind}:${f.id}`}
           selectedKey={selectedKey}
           onSelect={(f) => useStore.getState().focusOnStream({ kind: f.kind, id: f.id }, "streams")}
@@ -85,7 +88,7 @@ export function StreamsPanel() {
           onSortChange={(id, desc) => {
             if (COLS.find((c) => c.id === id)?.sort) setSort({ id, desc });
           }}
-          emptyText={t("streams.empty")}
+          emptyText={table.loaded ? t("streams.empty") : undefined}
         />
       </div>
       {focus ? <StreamDetail /> : null}

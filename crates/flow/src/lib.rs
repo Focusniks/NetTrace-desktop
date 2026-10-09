@@ -6,6 +6,7 @@
 //! a plain data structure; the engine guards it with a lock for concurrent
 //! readers.
 
+mod ring;
 mod seq;
 mod table;
 mod tcp;

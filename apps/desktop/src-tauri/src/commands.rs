@@ -6,11 +6,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use nettrace_engine::{
-    Engine, EngineError, FlowQuery, IoGraphRequest, SearchHit, SearchRequest, SortSpec, TimelineRequest,
+    ConversationQuery, Engine, EngineError, FlowQuery, HostQuery, IoGraphRequest, SearchHit, SearchRequest, SortSpec, TimelineRequest,
 };
 use nettrace_model::{
-    CaptureInfo, CaptureInterface, CaptureSummary, LiveOptions, ConversationKind, ConversationRow, FieldInfo, FilterError, FlowPage, FlowSummary,
-    HostRow, IndexProgress, Indicator, IoGraph, PacketDetail, PacketLengths, PacketRow, ProtocolNode, SequencePage,
+    CaptureInfo, CaptureInterface, CaptureSummary, LiveOptions, ConversationPage, FieldInfo, FilterError, FlowPage, FlowSummary,
+    HostPage, IndexProgress, Indicator, IoGraph, PacketDetail, PacketLengths, PacketRow, ProtocolNode, SequencePage,
     StreamRef, Timeline, ViewInfo,
 };
 use tauri::{AppHandle, Emitter, State};
@@ -155,13 +155,13 @@ pub async fn get_sequence(state: State<'_, AppState>, stream: StreamRef, offset:
 }
 
 #[tauri::command]
-pub async fn get_hosts(state: State<'_, AppState>) -> CmdResult<Vec<HostRow>> {
-    blocking(&state, |e| e.hosts()).await
+pub async fn get_hosts_page(state: State<'_, AppState>, query: HostQuery) -> CmdResult<HostPage> {
+    blocking(&state, move |e| e.hosts_page(&query)).await
 }
 
 #[tauri::command]
-pub async fn get_conversations(state: State<'_, AppState>, kind: ConversationKind) -> CmdResult<Vec<ConversationRow>> {
-    blocking(&state, move |e| e.conversations(kind)).await
+pub async fn get_conversations_page(state: State<'_, AppState>, query: ConversationQuery) -> CmdResult<ConversationPage> {
+    blocking(&state, move |e| e.conversations_page(&query)).await
 }
 
 #[tauri::command]

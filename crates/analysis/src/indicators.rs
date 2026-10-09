@@ -2,11 +2,12 @@
 //! the underlying packets. They state facts ("31 retransmissions"), never
 //! conclusions ("attack").
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
-use nettrace_flow::FlowTable;
+use nettrace_flow::{Flow, FlowTable};
 use nettrace_model::{Indicator, IndicatorKind, ProtocolId, Severity, TcpState, Transport};
 use nettrace_packet::Address;
+use nettrace_storage::{AddressTable, NONE};
 
 use crate::accum::Accumulators;
 
@@ -56,7 +57,23 @@ fn standard_port(protocol: ProtocolId, port: u16) -> bool {
     }
 }
 
-pub fn indicators(flows: &FlowTable, acc: &Accumulators, cfg: &IndicatorConfig) -> Vec<Indicator> {
+/// A connection attempt (SYN) with interned endpoint ids: 16 bytes per flow,
+/// grouped by sorting instead of per-client hash sets.
+#[derive(Clone, Copy)]
+struct Attempt {
+    client: u32,
+    server: u32,
+    port: u16,
+    refused: bool,
+    failed: bool,
+    first: u32,
+}
+
+fn endpoints(f: &Flow) -> String {
+    format!("{}:{} → {}:{}", f.client.0, f.client.1, f.server.0, f.server.1)
+}
+
+pub fn indicators(flows: &FlowTable, acc: &Accumulators, addrs: &AddressTable, cfg: &IndicatorConfig) -> Vec<Indicator> {
     let mut out = Vec::new();
     let mut retrans = Vec::new();
     let mut zero = Vec::new();
@@ -64,57 +81,54 @@ pub fn indicators(flows: &FlowTable, acc: &Accumulators, cfg: &IndicatorConfig) 
     let mut reset_streams = 0u32;
     let mut reset_packets = 0u64;
     let mut reset_first: Option<u32> = None;
-    let mut failed: HashMap<(Address, Address, u16), (u32, u32, u32)> = HashMap::new();
-    let mut per_client: HashMap<Address, (u32, HashSet<Address>, HashSet<u16>, u32)> = HashMap::new();
+    let mut attempts: Vec<Attempt> = Vec::new();
     let mut odd_ports: HashMap<(ProtocolId, u16), (u32, u32)> = HashMap::new();
+    let id = |a: &Address| addrs.id_of(a).unwrap_or(NONE);
 
     for f in flows.flows() {
-        let endpoints = format!("{}:{} → {}:{}", f.client.0, f.client.1, f.server.0, f.server.1);
-        let filter = f.filter();
         if let Some(t) = f.tcp.as_deref() {
-            let segments = f.packets.len() as u64;
+            let segments = u64::from(f.packet_count());
             let percent = if segments > 0 { f64::from(t.retransmissions) * 100.0 / segments as f64 } else { 0.0 };
             if t.retransmissions >= cfg.retrans_min_count && percent >= cfg.retrans_min_percent {
                 retrans.push(Indicator {
                     severity: Severity::Warning,
                     kind: IndicatorKind::TcpRetransmissionRate {
                         stream: f.stream_id,
-                        endpoints: endpoints.clone(),
+                        endpoints: endpoints(f),
                         retransmissions: t.retransmissions,
                         segments,
                         percent: (percent * 10.0).round() / 10.0,
                     },
-                    filter: format!("{filter} && tcp.analysis.retransmission"),
+                    filter: format!("{} && tcp.analysis.retransmission", f.filter()),
                     first_packet: Some(f.first_packet() + 1),
                 });
             }
             if t.zero_window > 0 {
                 zero.push(Indicator {
                     severity: Severity::Note,
-                    kind: IndicatorKind::TcpZeroWindow { stream: f.stream_id, endpoints: endpoints.clone(), count: t.zero_window },
-                    filter: format!("{filter} && tcp.analysis.zero_window"),
+                    kind: IndicatorKind::TcpZeroWindow { stream: f.stream_id, endpoints: endpoints(f), count: t.zero_window },
+                    filter: format!("{} && tcp.analysis.zero_window", f.filter()),
                     first_packet: Some(f.first_packet() + 1),
                 });
             }
             if t.resets > 0 {
                 reset_streams += 1;
                 reset_packets += u64::from(t.resets);
-                if let Some(p) = t.first_rst {
+                if let Some(p) = t.first_rst() {
                     reset_first = Some(reset_first.map_or(p, |x| x.min(p)));
                 }
             }
             let state = t.state();
-            if matches!(state, TcpState::Refused | TcpState::SynSent) {
-                let e = failed.entry((f.client.0, f.server.0, f.server.1)).or_insert((0, 0, f.first_packet()));
-                e.0 += 1;
-                e.1 += u32::from(state == TcpState::Refused);
-                e.2 = e.2.min(f.first_packet());
-            }
-            if t.syn.is_some() {
-                let e = per_client.entry(f.client.0).or_insert_with(|| (0, HashSet::new(), HashSet::new(), f.first_packet()));
-                e.0 += 1;
-                e.1.insert(f.server.0);
-                e.2.insert(f.server.1);
+            let failed = matches!(state, TcpState::Refused | TcpState::SynSent);
+            if t.syn().is_some() || failed {
+                attempts.push(Attempt {
+                    client: id(&f.client.0),
+                    server: id(&f.server.0),
+                    port: f.server.1,
+                    refused: state == TcpState::Refused,
+                    failed,
+                    first: f.first_packet(),
+                });
             }
         }
         if let Some(app) = f.app {
@@ -134,7 +148,7 @@ pub fn indicators(flows: &FlowTable, acc: &Accumulators, cfg: &IndicatorConfig) 
                     client_bytes: f.c2s.bytes,
                     server_bytes: f.s2c.bytes,
                 },
-                filter,
+                filter: f.filter(),
                 first_packet: Some(f.first_packet() + 1),
             });
         }
@@ -154,7 +168,17 @@ pub fn indicators(flows: &FlowTable, acc: &Accumulators, cfg: &IndicatorConfig) 
     });
     out.extend(retrans.into_iter().take(cfg.max_per_kind));
 
-    let mut failed: Vec<_> = failed.into_iter().filter(|(_, v)| v.0 >= cfg.failed_min_attempts).collect();
+    // Failed attempts per (client, server, port).
+    attempts.sort_unstable_by_key(|a| (a.client, a.server, a.port, a.first));
+    let mut failed = Vec::new();
+    for g in attempts.chunk_by(|x, y| (x.client, x.server, x.port) == (y.client, y.server, y.port)) {
+        let tries = g.iter().filter(|a| a.failed).count() as u32;
+        if tries >= cfg.failed_min_attempts {
+            let refused = g.iter().filter(|a| a.failed && a.refused).count() as u32;
+            let first = g.iter().filter(|a| a.failed).map(|a| a.first).min().unwrap_or(0);
+            failed.push(((addrs.get(g[0].client), addrs.get(g[0].server), g[0].port), (tries, refused, first)));
+        }
+    }
     failed.sort_by_key(|f| std::cmp::Reverse(f.1 .0));
     for ((client, server, port), (attempts, refused, first)) in failed.into_iter().take(cfg.max_per_kind) {
         out.push(Indicator {
@@ -185,10 +209,20 @@ pub fn indicators(flows: &FlowTable, acc: &Accumulators, cfg: &IndicatorConfig) 
     }
     out.extend(zero.into_iter().take(cfg.max_per_kind));
 
-    let mut busy: Vec<_> = per_client
-        .into_iter()
-        .filter(|(_, v)| v.0 >= cfg.many_connections || v.2.len() as u32 >= cfg.many_ports)
-        .collect();
+    // Connections (SYN), distinct peers and ports per client: groups of the
+    // sorted attempts (already ordered by client, server).
+    attempts.retain(|a| a.client != NONE);
+    let mut busy = Vec::new();
+    for g in attempts.chunk_by_mut(|x, y| x.client == y.client) {
+        let connections = g.len() as u32;
+        let peers = g.chunk_by(|x, y| x.server == y.server).count() as u32;
+        let first = g.iter().map(|a| a.first).min().unwrap_or(0);
+        g.sort_unstable_by_key(|a| a.port);
+        let ports = g.chunk_by(|x, y| x.port == y.port).count() as u32;
+        if connections >= cfg.many_connections || ports >= cfg.many_ports {
+            busy.push((addrs.get(g[0].client), (connections, peers, ports, first)));
+        }
+    }
     busy.sort_by_key(|b| std::cmp::Reverse(b.1 .0));
     for (host, (connections, peers, ports, first)) in busy.into_iter().take(cfg.max_per_kind) {
         out.push(Indicator {
@@ -196,8 +230,8 @@ pub fn indicators(flows: &FlowTable, acc: &Accumulators, cfg: &IndicatorConfig) 
             kind: IndicatorKind::ManyConnections {
                 host: host.to_string(),
                 connections,
-                distinct_peers: peers.len() as u32,
-                distinct_ports: ports.len() as u32,
+                distinct_peers: peers,
+                distinct_ports: ports,
             },
             filter: format!("{} && tcp.flags.syn == 1 && tcp.flags.ack == 0", addr_filter(&host, "src")),
             first_packet: Some(first + 1),

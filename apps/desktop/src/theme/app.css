@@ -176,6 +176,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .plist-hcell:hover { color: var(--text); background: var(--bg-hover); }
 .plist-hcell.is-sorted { color: var(--accent-strong); }
+.plist-hcell[tabindex="-1"] { cursor: default; }
+.plist-row.is-loading .plist-cell { width: 100%; }
 .plist-hcell .sort-arrow { font-size: 9px; }
 .resizer { position: absolute; right: -3px; top: 0; bottom: 0; width: 7px; cursor: col-resize; z-index: 2; }
 .plist-body { flex: 1; overflow: auto; position: relative; }

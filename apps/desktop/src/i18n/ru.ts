@@ -208,7 +208,7 @@ export const ru = {
   "status.readError": "Не удалось прочитать пакет из файла",
   "status.rowsError": "Не удалось загрузить строки списка: {message}",
   "status.retry": "Повторить",
-  "status.warning.limit_reached": "Достигнут предел памяти для статистики — часть узлов, соединений или событий не учтена",
+  "status.warning.limit_reached": "Достигнут предел: часть потоков или событий временной шкалы не учтена (пакеты в списке все)",
 
   "indexing.title": "Индексирование…",
   "indexing.found": "Найдено: {packets} пакетов · {flows} потоков",
@@ -341,6 +341,7 @@ export const ru = {
   "hosts.filter": "Фильтр по узлу",
   "hosts.search": "Поиск узла…",
 
+  "conv.search": "Поиск по адресу или порту…",
   "conv.eth": "Ethernet",
   "conv.ip": "IP",
   "conv.tcp": "TCP",

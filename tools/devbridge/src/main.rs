@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use nettrace_engine::{Engine, EngineError, FlowQuery, IoGraphRequest, SearchRequest, SortSpec, TimelineRequest};
-use nettrace_model::{ConversationKind, LiveOptions, StreamRef};
+use nettrace_model::{LiveOptions, StreamRef};
 use serde::de::DeserializeOwned;
 use serde_json::{json, Value};
 
@@ -74,8 +74,8 @@ fn dispatch(engine: &Engine, cmd: &str, a: &Value) -> Result<Value, EngineError>
         "list_flows" => ok(engine.flows(&arg::<FlowQuery>(a, "query")?)?),
         "get_flow" => ok(engine.flow(arg::<StreamRef>(a, "stream")?)?),
         "get_sequence" => ok(engine.sequence(arg(a, "stream")?, arg(a, "offset")?, arg(a, "limit")?)?),
-        "get_hosts" => ok(engine.hosts()?),
-        "get_conversations" => ok(engine.conversations(arg::<ConversationKind>(a, "kind")?)?),
+        "get_hosts_page" => ok(engine.hosts_page(&arg(a, "query")?)?),
+        "get_conversations_page" => ok(engine.conversations_page(&arg(a, "query")?)?),
         "get_protocol_hierarchy" => ok(engine.protocol_hierarchy()?),
         "get_io_graph" => ok(engine.io_graph(&arg::<IoGraphRequest>(a, "request")?)?),
         "get_packet_lengths" => {

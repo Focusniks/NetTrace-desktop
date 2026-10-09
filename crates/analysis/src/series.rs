@@ -129,33 +129,34 @@ pub fn timeline(
         }
     }
     let rel = |ts: i64| ts.saturating_sub(base_ns) as f64 / 1e9;
-    let mut list: Vec<(i64, TimelineEvent)> = Vec::new();
+    /// An event before its label exists: labels are formatted only for the
+    /// events kept after truncation (a capture can have millions of flows).
+    struct Candidate {
+        ts: i64,
+        packet: u32,
+        kind: TimelineKind,
+        /// Flow index for TCP open/close, event index for application events.
+        source: u32,
+    }
+    let mut list: Vec<Candidate> = Vec::new();
     let mut active = vec![0i64; buckets + 1];
-    for f in flows.flows() {
+    for (fi, f) in flows.flows().iter().enumerate() {
         if f.transport != Transport::Tcp {
             continue;
         }
-        let stream = Some(StreamRef { kind: Transport::Tcp, id: f.stream_id });
         if f.last_ts_ns >= start_ns && f.first_ts_ns <= end_ns {
             let a = slot(f.first_ts_ns.max(start_ns)).unwrap_or(0);
             let b = slot(f.last_ts_ns.min(end_ns)).unwrap_or(buckets - 1);
             active[a] += 1;
             active[b + 1] -= 1;
         }
-        let endpoints = format!("{}:{} → {}:{}", f.client.0, f.client.1, f.server.0, f.server.1);
         if let Some(b) = slot(f.first_ts_ns) {
             t.tcp_open[b] += 1;
-            list.push((f.first_ts_ns, TimelineEvent {
-                kind: TimelineKind::TcpOpen,
-                number: f.first_packet() + 1,
-                time_rel: rel(f.first_ts_ns),
-                label: endpoints.clone(),
-                stream,
-            }));
+            list.push(Candidate { ts: f.first_ts_ns, packet: f.first_packet(), kind: TimelineKind::TcpOpen, source: fi as u32 });
         }
         if let Some(tcp) = f.tcp.as_deref() {
-            let closing = tcp.first_rst.map(|p| (p, TimelineKind::TcpReset)).or_else(|| {
-                match (tcp.fin[0], tcp.fin[1]) {
+            let closing = tcp.first_rst().map(|p| (p, TimelineKind::TcpReset)).or_else(|| {
+                match (tcp.fin(0), tcp.fin(1)) {
                     (Some(a), Some(b)) => Some((a.max(b), TimelineKind::TcpClose)),
                     _ => None,
                 }
@@ -163,7 +164,7 @@ pub fn timeline(
             if let Some((packet, kind)) = closing {
                 if let Some(m) = metas.get(packet as usize) {
                     if slot(m.ts_ns).is_some() {
-                        list.push((m.ts_ns, TimelineEvent { kind, number: packet + 1, time_rel: rel(m.ts_ns), label: endpoints, stream }));
+                        list.push(Candidate { ts: m.ts_ns, packet, kind, source: fi as u32 });
                     }
                 }
             }
@@ -174,7 +175,7 @@ pub fn timeline(
         running += active[i];
         *v = running.max(0) as u32;
     }
-    for e in events {
+    for (ei, e) in events.iter().enumerate() {
         let Some(b) = slot(e.ts_ns) else { continue };
         match e.kind {
             TimelineKind::DnsQuery | TimelineKind::DnsResponse => t.dns[b] += 1,
@@ -182,15 +183,32 @@ pub fn timeline(
             TimelineKind::HttpRequest | TimelineKind::HttpResponse => t.http[b] += 1,
             _ => {}
         }
-        let stream = e.flow.and_then(|f| flows.flow(f)).map(|f| StreamRef { kind: f.transport, id: f.stream_id });
-        list.push((e.ts_ns, TimelineEvent { kind: e.kind, number: e.packet + 1, time_rel: rel(e.ts_ns), label: e.label.clone(), stream }));
+        list.push(Candidate { ts: e.ts_ns, packet: e.packet, kind: e.kind, source: ei as u32 });
     }
-    list.sort_by_key(|(ts, e)| (*ts, e.number));
+    // Stable: equal (time, packet) keep the insertion order.
+    list.sort_by_key(|c| (c.ts, c.packet));
     if list.len() > max_events {
         t.events_truncated = true;
         list.truncate(max_events);
     }
-    t.events = list.into_iter().map(|(_, e)| e).collect();
+    t.events = list
+        .into_iter()
+        .map(|c| {
+            let (label, stream) = match c.kind {
+                TimelineKind::TcpOpen | TimelineKind::TcpClose | TimelineKind::TcpReset => {
+                    let f = &flows.flows()[c.source as usize];
+                    let label = format!("{}:{} → {}:{}", f.client.0, f.client.1, f.server.0, f.server.1);
+                    (label, Some(StreamRef { kind: Transport::Tcp, id: f.stream_id }))
+                }
+                _ => {
+                    let e = &events[c.source as usize];
+                    let stream = e.flow.and_then(|f| flows.flow(f)).map(|f| StreamRef { kind: f.transport, id: f.stream_id });
+                    (e.label.clone(), stream)
+                }
+            };
+            TimelineEvent { kind: c.kind, number: c.packet + 1, time_rel: rel(c.ts), label, stream }
+        })
+        .collect();
     t
 }
 
@@ -211,6 +229,7 @@ mod tests {
             l2_src: NONE,
             l2_dst: NONE,
             flow: NONE,
+            next_in_flow: NONE,
             sport: 0,
             dport: 0,
             analysis: 0,

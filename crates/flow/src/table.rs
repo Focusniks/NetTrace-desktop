@@ -1,11 +1,12 @@
-use std::collections::HashMap;
+use std::hash::BuildHasher;
 
+use hashbrown::{DefaultHashBuilder, HashTable};
 use nettrace_model::{
     tcp_analysis as ta, Endpoint, FlowSummary, Handshake, ProtocolId, TcpFlowStats, Transport,
 };
 use nettrace_packet::Address;
 
-use crate::tcp::TcpFlow;
+use crate::tcp::{RttSample, TcpFlow};
 use crate::{flags as fl, Dir};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,11 +48,14 @@ pub struct FlowAssignment {
     pub flow: u32,
     pub dir: Dir,
     pub analysis: u16,
+    /// Previous packet of the same flow: the caller links it to this one
+    /// (the per-flow packet list lives in the packet index, not here).
+    pub prev: Option<u32>,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct DirStats {
-    pub packets: u64,
+    pub packets: u32,
     pub bytes: u64,
     pub payload: u64,
 }
@@ -65,8 +69,10 @@ pub struct Flow {
     pub server: (Address, u16),
     pub first_ts_ns: i64,
     pub last_ts_ns: i64,
-    /// Packet indices (0-based) in capture order.
-    pub packets: Vec<u32>,
+    /// First and last packet index (0-based). The packets in between are
+    /// linked through the packet index (`PacketMeta::next_in_flow`).
+    pub first: u32,
+    pub last: u32,
     pub c2s: DirStats,
     pub s2c: DirStats,
     pub app: Option<ProtocolId>,
@@ -79,11 +85,15 @@ impl Flow {
     }
 
     pub fn first_packet(&self) -> u32 {
-        self.packets.first().copied().unwrap_or(0)
+        self.first
     }
 
     pub fn last_packet(&self) -> u32 {
-        self.packets.last().copied().unwrap_or(0)
+        self.last
+    }
+
+    pub fn packet_count(&self) -> u32 {
+        self.c2s.packets + self.s2c.packets
     }
 
     pub fn duration_ns(&self) -> i64 {
@@ -110,15 +120,15 @@ impl Flow {
         let tcp = self.tcp.as_deref().map(|t| TcpFlowStats {
             state: t.state(),
             handshake: Handshake {
-                syn: t.syn.map(|p| p + 1),
-                syn_ack: t.syn_ack.map(|p| p + 1),
-                ack: t.handshake_ack.map(|p| p + 1),
+                syn: t.syn().map(|p| p + 1),
+                syn_ack: t.syn_ack().map(|p| p + 1),
+                ack: t.handshake_ack().map(|p| p + 1),
             },
-            irtt_ms: t.irtt_ns.map(ms),
-            rtt_min_ms: t.rtt_min_ns.map(ms),
+            irtt_ms: t.irtt_ns().map(ms),
+            rtt_min_ms: t.rtt_min_ns().map(ms),
             rtt_avg_ms: t.rtt_avg_ns().map(ms),
-            rtt_max_ms: t.rtt_max_ns.map(ms),
-            rtt_samples: t.rtt_samples.len() as u32,
+            rtt_max_ms: t.rtt_max_ns().map(ms),
+            rtt_samples: t.rtt_count,
             retransmissions: t.retransmissions,
             fast_retransmissions: t.fast_retransmissions,
             duplicate_acks: t.duplicate_acks,
@@ -127,8 +137,8 @@ impl Flow {
             keep_alive: t.keep_alive,
             lost_segments: t.lost_segments,
             resets: t.resets,
-            fin_client: t.fin[0].map(|p| p + 1),
-            fin_server: t.fin[1].map(|p| p + 1),
+            fin_client: t.fin(0).map(|p| p + 1),
+            fin_server: t.fin(1).map(|p| p + 1),
             throughput_c2s: throughput(self.c2s.payload),
             throughput_s2c: throughput(self.s2c.payload),
         });
@@ -144,12 +154,12 @@ impl Flow {
                     Transport::Tcp => "TCP".to_owned(),
                     Transport::Udp => "UDP".to_owned(),
                 }),
-            packets: self.packets.len() as u64,
+            packets: u64::from(self.packet_count()),
             bytes: self.total_bytes(),
-            c2s_packets: self.c2s.packets,
+            c2s_packets: u64::from(self.c2s.packets),
             c2s_bytes: self.c2s.bytes,
             c2s_payload: self.c2s.payload,
-            s2c_packets: self.s2c.packets,
+            s2c_packets: u64::from(self.s2c.packets),
             s2c_bytes: self.s2c.bytes,
             s2c_payload: self.s2c.payload,
             first_packet: self.first_packet() + 1,
@@ -180,13 +190,24 @@ fn is_well_known(port: u16) -> bool {
     port < 1024
 }
 
+impl Flow {
+    fn key(&self) -> FlowKey {
+        FlowKey::new(self.transport, self.client, self.server)
+    }
+}
+
 /// All flows of a capture.
 #[derive(Debug, Default)]
 pub struct FlowTable {
     flows: Vec<Flow>,
-    by_key: HashMap<FlowKey, u32>,
+    /// Flow index by endpoints; the key is read back from `flows`, so an
+    /// entry costs 4 bytes instead of a copy of both endpoints.
+    by_key: HashTable<u32>,
+    hasher: DefaultHashBuilder,
     tcp_streams: Vec<u32>,
     udp_streams: Vec<u32>,
+    /// RTT samples of all flows in capture order of the acknowledging packet.
+    rtt: Vec<RttSample>,
 }
 
 impl FlowTable {
@@ -217,6 +238,30 @@ impl FlowTable {
 
     pub fn udp_count(&self) -> u32 {
         self.udp_streams.len() as u32
+    }
+
+    /// RTT sample recorded on the ACK with packet index `packet`.
+    pub fn rtt_for(&self, packet: u32) -> Option<RttSample> {
+        self.rtt.binary_search_by_key(&packet, |s| s.packet).ok().map(|i| self.rtt[i])
+    }
+
+    /// Called when no more packets will arrive: drops per-connection analysis
+    /// state and spare capacity.
+    pub fn finish(&mut self) {
+        for f in &mut self.flows {
+            if let Some(t) = f.tcp.as_deref_mut() {
+                t.finish();
+            }
+        }
+        self.flows.shrink_to_fit();
+        self.rtt.shrink_to_fit();
+        self.tcp_streams.shrink_to_fit();
+        self.udp_streams.shrink_to_fit();
+    }
+
+    fn find(&self, key: &FlowKey) -> Option<u32> {
+        let flows = &self.flows;
+        self.by_key.find(self.hasher.hash_one(key), |&i| flows[i as usize].key() == *key).copied()
     }
 
     fn create(&mut self, key: FlowKey, p: &FlowPacket) -> u32 {
@@ -255,13 +300,22 @@ impl FlowTable {
             server,
             first_ts_ns: p.ts_ns,
             last_ts_ns: p.ts_ns,
-            packets: Vec::new(),
+            first: p.index,
+            last: p.index,
             c2s: DirStats::default(),
             s2c: DirStats::default(),
             app: None,
             tcp: (transport == Transport::Tcp).then(Box::default),
         });
-        self.by_key.insert(key, index);
+        // A reused port pair replaces the older flow under the same key.
+        let hash = self.hasher.hash_one(key);
+        let flows = &self.flows;
+        match self.by_key.find_mut(hash, |&i| flows[i as usize].key() == key) {
+            Some(slot) => *slot = index,
+            None => {
+                self.by_key.insert_unique(hash, index, |&i| self.hasher.hash_one(flows[i as usize].key()));
+            }
+        }
         index
     }
 
@@ -274,7 +328,7 @@ impl FlowTable {
         };
         let key = FlowKey::new(transport, (p.src, p.sport), (p.dst, p.dport));
         let mut extra = 0u16;
-        let index = match self.by_key.get(&key).copied() {
+        let index = match self.find(&key) {
             None => self.create(key, p),
             Some(existing) => {
                 if self.is_port_reuse(existing, p) {
@@ -287,7 +341,8 @@ impl FlowTable {
         };
         let flow = &mut self.flows[index as usize];
         let dir = flow.direction_of(p.src, p.sport);
-        flow.packets.push(p.index);
+        let prev = (flow.packet_count() > 0).then_some(flow.last);
+        flow.last = p.index;
         flow.last_ts_ns = flow.last_ts_ns.max(p.ts_ns);
         let payload = match p.kind {
             FlowKind::Tcp(seg) => seg.payload_len,
@@ -307,8 +362,11 @@ impl FlowTable {
         if let (FlowKind::Tcp(seg), Some(tcp)) = (p.kind, flow.tcp.as_deref_mut()) {
             let a = tcp.analyse(p.index, p.ts_ns, dir, &seg);
             analysis |= a.flags;
+            if let Some(sample) = a.rtt {
+                self.rtt.push(sample);
+            }
         }
-        FlowAssignment { flow: index, dir, analysis }
+        FlowAssignment { flow: index, dir, analysis, prev }
     }
 
     /// Like [`FlowTable::process`], but when `allow_new` is false packets of
@@ -320,8 +378,8 @@ impl FlowTable {
                 FlowKind::Udp { .. } => Transport::Udp,
             };
             let key = FlowKey::new(transport, (p.src, p.sport), (p.dst, p.dport));
-            match self.by_key.get(&key) {
-                Some(&idx) if !self.is_port_reuse(idx, p) => {}
+            match self.find(&key) {
+                Some(idx) if !self.is_port_reuse(idx, p) => {}
                 _ => return None,
             }
         }
@@ -336,8 +394,8 @@ impl FlowTable {
         let flow = &self.flows[existing as usize];
         let Some(tcp) = flow.tcp.as_deref() else { return false };
         let dir = flow.direction_of(p.src, p.sport);
-        let same_isn = tcp.syn.is_some() && tcp.dirs[dir.index()].base_seq == Some(seg.seq);
+        let same_isn = tcp.syn().is_some() && tcp.dirs[dir.index()].base_seq == Some(seg.seq);
         // A SYN that is not a retransmission of the flow's own SYN starts a new stream.
-        !flow.packets.is_empty() && !same_isn
+        flow.packet_count() > 0 && !same_isn
     }
 }

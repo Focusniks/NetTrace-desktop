@@ -77,6 +77,9 @@ pub(crate) fn apply(sh: &mut Shared, rec: &RecordMeta, s: &Summary) {
             Some(a) => {
                 flow = a.flow;
                 analysis = a.analysis;
+                if let Some(m) = a.prev.and_then(|prev| sh.index.get_mut(prev)) {
+                    m.next_in_flow = index;
+                }
                 if a.dir == Dir::ServerToClient {
                     st |= status::REVERSE;
                 }
@@ -95,6 +98,7 @@ pub(crate) fn apply(sh: &mut Shared, rec: &RecordMeta, s: &Summary) {
         l2_src,
         l2_dst,
         flow,
+        next_in_flow: NONE,
         sport: s.src_port,
         dport: s.dst_port,
         analysis,
@@ -111,6 +115,11 @@ pub(crate) fn apply(sh: &mut Shared, rec: &RecordMeta, s: &Summary) {
         l2_dst: s.l2_dst,
         net_src: s.net_src,
         net_dst: s.net_dst,
+        // `src`/`dst` fall back to the link layer when there is no network address.
+        l2_src_id: l2_src,
+        l2_dst_id: l2_dst,
+        net_src_id: if s.net_src.is_none() { NONE } else { src },
+        net_dst_id: if s.net_dst.is_none() { NONE } else { dst },
         protocols: s.protocols,
         path: &s.path[..usize::from(s.path_len)],
         malformed: s.malformed,
@@ -212,6 +221,13 @@ pub(crate) fn run<S: PacketSource>(session: Arc<Session>, mut reader: S, on_prog
         }
     };
     flush(&mut pending, &reader, &mut link_types_seen);
+    {
+        // No more packets: per-connection analysis state and spare capacity go.
+        let mut sh = session.data.write();
+        sh.flows.finish();
+        sh.index.shrink_to_fit();
+        sh.acc.shrink_to_fit();
+    }
     let warning = warning.or_else(|| session.data.read().acc.limit_reached.then(|| "limit_reached".to_owned()));
     // A capture that stopped because of a driver/disk error is reported as failed.
     let state = match &session.live {

@@ -27,7 +27,7 @@ pub fn frame_context(shared: &Shared, index: u32) -> FrameContext {
         match (flow.transport, flow.tcp.as_deref()) {
             (Transport::Tcp, Some(tcp)) => {
                 let dir = if m.reverse() { Dir::ServerToClient } else { Dir::ClientToServer };
-                let rtt = tcp.rtt_for(index);
+                let rtt = shared.flows.rtt_for(index);
                 fctx.tcp = Some(TcpAnnotations {
                     stream: flow.stream_id,
                     seq_base: tcp.dirs[dir.index()].base_seq,

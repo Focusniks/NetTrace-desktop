@@ -108,7 +108,10 @@ pub fn filter_indices(
             if !keep_going() {
                 return Err(EngineError::cancelled());
             }
-            let sh = data.read();
+            // Recursive: a rayon worker must never queue behind a waiting
+            // writer (the indexer) while another request holds a read lock and
+            // waits for this pool (parallel sort/search) — that would deadlock.
+            let sh = data.read_recursive();
             let metas = sh.index.all();
             let mut out = Vec::new();
             for i in r {

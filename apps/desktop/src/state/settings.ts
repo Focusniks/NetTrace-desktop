@@ -53,6 +53,10 @@ export interface Settings {
   autoScroll: boolean;
   /** Parameters of the last live capture (for restart and as dialog defaults). */
   lastCapture: LiveOptions | null;
+  /** Look for a new release on startup. */
+  autoUpdateCheck: boolean;
+  /** Release the user chose to skip ("Пропустить эту версию"). */
+  skippedVersion: string | null;
 }
 
 const KEY = "nettrace.settings.v1";
@@ -69,6 +73,8 @@ export const DEFAULT_SETTINGS: Settings = {
   detailFraction: 0.58,
   autoScroll: true,
   lastCapture: null,
+  autoUpdateCheck: true,
+  skippedVersion: null,
 };
 
 function sanitizeColumns(cols: unknown): ColumnConfig[] {
@@ -96,6 +102,8 @@ export function loadSettings(): Settings {
       coloringRules: Array.isArray(s.coloringRules) ? s.coloringRules : DEFAULT_RULES,
       recentFiles: Array.isArray(s.recentFiles) ? s.recentFiles.slice(0, 10) : [],
       filterHistory: Array.isArray(s.filterHistory) ? s.filterHistory.slice(0, 30) : [],
+      autoUpdateCheck: s.autoUpdateCheck !== false,
+      skippedVersion: typeof s.skippedVersion === "string" ? s.skippedVersion : null,
     };
   } catch {
     return DEFAULT_SETTINGS;

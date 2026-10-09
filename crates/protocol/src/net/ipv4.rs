@@ -14,13 +14,14 @@ const P: ProtocolId = ProtocolId::Ipv4;
 
 /// RFC 1071 internet checksum over `data`.
 pub(crate) fn internet_checksum(data: &[u8]) -> u16 {
-    let mut sum: u32 = 0;
-    let mut chunks = data.chunks_exact(2);
-    for c in &mut chunks {
-        sum += u32::from(u16::from_be_bytes([c[0], c[1]]));
+    // u64: no overflow even for the largest captured frames.
+    let mut sum: u64 = 0;
+    let (pairs, rest) = data.as_chunks::<2>();
+    for pair in pairs {
+        sum += u64::from(u16::from_be_bytes(*pair));
     }
-    if let [last] = chunks.remainder() {
-        sum += u32::from(*last) << 8;
+    if let [last] = rest {
+        sum += u64::from(*last) << 8;
     }
     while sum > 0xffff {
         sum = (sum & 0xffff) + (sum >> 16);

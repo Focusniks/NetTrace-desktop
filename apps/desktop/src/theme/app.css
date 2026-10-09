@@ -338,6 +338,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 /* dialogs */
 .dialog-backdrop { position: fixed; inset: 0; z-index: 200; background: rgba(5, 7, 10, .55); display: flex; align-items: center; justify-content: center; }
 .dialog { min-width: 360px; max-width: min(960px, 92vw); max-height: 86vh; display: flex; flex-direction: column; background: var(--bg-panel); border: 1px solid var(--border-strong); border-radius: 4px; box-shadow: 0 16px 48px rgba(0,0,0,.55); }
+.dialog:focus { outline: none; }
 .dialog-title { display: flex; align-items: center; height: 32px; padding: 0 12px; border-bottom: 1px solid var(--border); color: var(--text-strong); font-weight: 600; }
 .dialog-title .icon-btn { margin-left: auto; }
 .dialog-body { padding: 12px; overflow: auto; min-height: 0; }
@@ -401,3 +402,19 @@ input[type="checkbox"] { accent-color: var(--accent); }
 .capture-options .input { width: 100%; }
 .capture-options .checkbox .input { width: 90px; }
 .sb-live { color: #ff8a80; font-weight: 600; }
+
+/* Update dialog */
+.update-notes-title { margin: 12px 0 6px; font-size: var(--fs-small); color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.update-notes {
+  max-height: 220px; overflow: auto; padding: 8px 10px; white-space: pre-wrap; overflow-wrap: anywhere;
+  background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius); line-height: 1.5;
+}
+.update-notes-h { font-weight: 600; margin-top: 6px; }
+.update-notes-h:first-child { margin-top: 0; }
+.update-notes-li { padding-left: 4px; }
+.update-progress {
+  position: relative; margin-top: 12px; height: 22px; overflow: hidden;
+  background: var(--bg-input); border: 1px solid var(--border); border-radius: var(--radius);
+}
+.update-progress-bar { position: absolute; inset: 0 auto 0 0; background: var(--bg-selected); transition: width 0.2s; }
+.update-progress span { position: relative; display: block; padding: 0 8px; line-height: 20px; font-size: var(--fs-small); }

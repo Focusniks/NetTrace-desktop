@@ -1,0 +1,143 @@
+# Builds and publishes a release when a vX.Y.Z tag is pushed (scripts/release.mjs).
+# The installer, its update signature and latest.json are attached to a public
+# GitHub release; installed copies find it through
+# https://github.com/Focusniks/NetTrace-desktop/releases/latest/download/latest.json
+#
+# The release is created as a draft and published only after every asset is
+# uploaded and checked, so "latest" never points at a broken release.
+#
+# Secrets are scoped to the single step that needs them. The signing key is
+# only present while tauri-action compiles and bundles; the frontend is built
+# before that, without secrets.
+name: Release
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+# bash (with -e) so a failing command in a multi-line step fails the step.
+defaults:
+  run:
+    shell: bash
+
+# Actions are pinned to commit SHAs; Dependabot (.github/dependabot.yml) bumps them.
+jobs:
+  release:
+    name: Build and publish
+    runs-on: windows-latest
+    env:
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      # A tag on any other branch could carry a modified workflow.
+      - name: Check that the tag is on main
+        run: |
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::Tag $TAG does not point to a commit on main"
+            exit 1
+          fi
+
+      - name: Check the signing key secret
+        env:
+          KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then
+            echo "::error::Secret TAURI_SIGNING_PRIVATE_KEY is not set (see docs/RELEASING.md)"
+            exit 1
+          fi
+
+      - name: Check that the tag matches the app version
+        run: node scripts/release-ci.mjs check "$TAG"
+
+      - name: Release notes from CHANGELOG.md
+        id: notes
+        run: |
+          node scripts/release-ci.mjs notes "$TAG" release-notes.md
+          delimiter="NOTES_$(node -e 'process.stdout.write(require("crypto").randomBytes(16).toString("hex"))')"
+          {
+            echo "body<<$delimiter"
+            cat release-notes.md
+            echo "$delimiter"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          toolchain: stable
+          components: clippy
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      # No dependency install scripts: nothing in the build needs them.
+      - name: Install frontend dependencies
+        working-directory: apps/desktop
+        run: npm ci --ignore-scripts
+
+      # Type check + vite build, before cargo (the app embeds dist/) and
+      # before the signing key is in the environment.
+      - name: Build frontend
+        working-directory: apps/desktop
+        run: npm run build
+
+      - name: Tests
+        run: |
+          cargo test --workspace --locked
+          cargo clippy --workspace --all-targets --locked -- -D warnings
+          node --test "scripts/*.test.mjs"
+          npm --prefix apps/desktop test
+
+      - name: Build, sign and upload (draft)
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0.6.2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Update signing key (minisign), see docs/RELEASING.md.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: apps/desktop
+          tauriScript: npm run tauri
+          # The frontend is already built: no npm code runs next to the key.
+          args: --config src-tauri/tauri.release.conf.json
+          tagName: ${{ github.ref_name }}
+          releaseName: NetTrace ${{ github.ref_name }}
+          releaseBody: ${{ steps.notes.outputs.body }}
+          releaseDraft: true
+          prerelease: false
+          includeUpdaterJson: true
+          updaterJsonPreferNsis: true
+
+      - name: Verify assets and publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version="${TAG#v}"
+          assets="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')"
+          echo "$assets"
+          for name in latest.json "NetTrace_${version}_x64-setup.exe" "NetTrace_${version}_x64-setup.exe.sig"; do
+            if ! grep -qxF "$name" <<<"$assets"; then
+              echo "::error::Release asset $name is missing; the draft is left unpublished"
+              exit 1
+            fi
+          done
+          # latest.json must announce this version with a signed Windows package from this repo.
+          mkdir -p verify
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern latest.json --pattern "*.sig" --dir verify
+          node scripts/release-ci.mjs manifest "$TAG" verify
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest

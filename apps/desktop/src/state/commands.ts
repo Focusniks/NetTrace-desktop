@@ -22,7 +22,7 @@ export function isCapturing(): boolean {
 }
 
 /** Stops a running capture and waits until its last packets are indexed. */
-async function stopAndWait(timeoutMs = 15000): Promise<void> {
+export async function stopAndWait(timeoutMs = 15000): Promise<void> {
   if (!isCapturing()) return;
   await s().stopCapture();
   const until = Date.now() + timeoutMs;

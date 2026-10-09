@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 
+import { inTauri } from "../../api/client";
 import { t, type MessageKey } from "../../i18n";
 import type { TimeFormat } from "../../lib/format";
 import { commands } from "../../state/commands";
 import { useStore } from "../../state/store";
+import { checkForUpdates } from "../../state/updater";
 import { MenuItems, type MenuEntry } from "../common/ContextMenu";
 import { Logo } from "../common/Icon";
 
@@ -120,6 +122,18 @@ function useMenus(): { id: MessageKey; items: MenuEntry[] }[] {
         { label: t("action.shortcuts"), shortcut: "F1", onSelect: () => st.setDialog("shortcuts") },
         { label: t("action.fieldReference"), onSelect: () => st.setDialog("fields") },
         { kind: "separator" },
+        // Updates exist only in the installed app, not in the browser dev build.
+        ...(inTauri
+          ? ([
+              { label: t("action.checkUpdates"), onSelect: () => void checkForUpdates(true) },
+              {
+                label: t("action.autoUpdateCheck"),
+                checked: settings.autoUpdateCheck,
+                onSelect: () => st.updateSettings({ autoUpdateCheck: !settings.autoUpdateCheck }),
+              },
+              { kind: "separator" },
+            ] satisfies MenuEntry[])
+          : []),
         { label: t("action.about"), onSelect: () => st.setDialog("about") },
       ],
     },

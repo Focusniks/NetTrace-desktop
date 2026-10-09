@@ -15,6 +15,7 @@ import { Toolbar } from "./components/layout/Toolbar";
 import { t } from "./i18n";
 import { commands } from "./state/commands";
 import { syncColoringRules, useStore } from "./state/store";
+import { checkForUpdates } from "./state/updater";
 
 function useGlobalShortcuts() {
   useEffect(() => {
@@ -112,6 +113,10 @@ export function App() {
     if (devOpen) void commands.openPath(devOpen);
     // Dev bridge only: expose the store for manual testing in the browser console.
     if (!inTauri && import.meta.env.DEV) (window as unknown as { __nettrace: unknown }).__nettrace = { store: useStore };
+    // Quiet update check shortly after start, so it never delays opening a file.
+    if (inTauri && useStore.getState().settings.autoUpdateCheck) {
+      window.setTimeout(() => void checkForUpdates(false), 5000);
+    }
     void api
       .initialFile()
       .then((p) => {

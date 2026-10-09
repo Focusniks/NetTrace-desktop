@@ -15,7 +15,16 @@ export function Dialog({ title, onClose, children, footer, width }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null;
-    const first = ref.current?.querySelector<HTMLElement>("input, select, textarea, button:not(.icon-btn)");
+    // Focus an element marked data-autofocus, else the first field, else the
+    // primary action (so Enter never triggers a secondary button such as
+    // "skip"), else the dialog itself so keys never reach the page behind it.
+    const root = ref.current;
+    const first =
+      root?.querySelector<HTMLElement>("[data-autofocus]") ??
+      root?.querySelector<HTMLElement>("input, select, textarea") ??
+      root?.querySelector<HTMLElement>("button.btn-primary") ??
+      root?.querySelector<HTMLElement>("button:not(.icon-btn)") ??
+      root;
     first?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -32,7 +41,7 @@ export function Dialog({ title, onClose, children, footer, width }: Props) {
 
   return (
     <div className="dialog-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div ref={ref} className="dialog" role="dialog" aria-modal="true" aria-label={title} style={width ? { width } : undefined}>
+      <div ref={ref} className="dialog" tabIndex={-1} role="dialog" aria-modal="true" aria-label={title} style={width ? { width } : undefined}>
         <div className="dialog-title">
           <span>{title}</span>
           <button className="icon-btn" onClick={onClose} aria-label={t("dialog.close")}>

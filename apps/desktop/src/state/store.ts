@@ -18,7 +18,7 @@ import type { TimeFormat } from "../lib/format";
 import { loadSettings, saveSettings, type ColumnConfig, type Settings } from "./settings";
 
 export type DockTab = "streams" | "sequence" | "hosts" | "conversations" | "statistics" | "timeline" | "indicators";
-export type DialogId = "goto" | "coloring" | "properties" | "about" | "shortcuts" | "fields" | "capture" | "unsaved" | null;
+export type DialogId = "goto" | "coloring" | "properties" | "about" | "shortcuts" | "fields" | "capture" | "unsaved" | "update" | null;
 
 export interface Highlight {
   start: number;

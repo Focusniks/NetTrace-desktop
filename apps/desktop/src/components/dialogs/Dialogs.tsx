@@ -4,10 +4,12 @@ import { t } from "../../i18n";
 import { DEFAULT_RULES, type ColorRule } from "../../lib/coloring";
 import { fmtAbsolute, fmtBytes, fmtDuration, fmtInt, fmtRate } from "../../lib/format";
 import { useStore } from "../../state/store";
+import { APP_VERSION } from "../../version";
 import { CaptureDialog, UnsavedDialog } from "../capture/CaptureDialog";
 import { Dialog } from "../common/Dialog";
 import { Icon } from "../common/Icon";
 import { filterErrorText } from "../filter/FilterBar";
+import { UpdateDialog } from "./UpdateDialog";
 
 export function Dialogs() {
   const dialog = useStore((s) => s.dialog);
@@ -23,9 +25,15 @@ export function Dialogs() {
       return (
         <Dialog title={t("dialog.about.title")} onClose={close} width={460}>
           <p style={{ marginTop: 0 }}>
-            <strong>{t("app.title")}</strong> · 0.1.0
+            <strong>{t("app.title")}</strong>
+            <br />
+            <span className="muted">{t("dialog.about.version", { version: APP_VERSION })}</span>
           </p>
           <p className="muted">{t("dialog.about.text")}</p>
+          <p className="muted">{t("dialog.about.network")}</p>
+          <p className="faint" style={{ marginBottom: 0 }}>
+            {t("dialog.about.license")} github.com/Focusniks/NetTrace-desktop
+          </p>
         </Dialog>
       );
     case "shortcuts":
@@ -36,6 +44,8 @@ export function Dialogs() {
       return <CaptureDialog onClose={close} />;
     case "unsaved":
       return <UnsavedDialog onClose={close} />;
+    case "update":
+      return <UpdateDialog />;
     default:
       return null;
   }

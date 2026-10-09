@@ -14,6 +14,8 @@ fn file_from_args() -> Option<PathBuf> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(AppState { engine: Arc::new(Engine::new()), initial_file: std::sync::Mutex::new(file_from_args()) })
         .invoke_handler(tauri::generate_handler![
             commands::open_capture,

@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# bash (with -e) so a failing command in a multi-line step fails the step.
+defaults:
+  run:
+    shell: bash
+
+# Actions are pinned to commit SHAs; Dependabot (.github/dependabot.yml) bumps them.
+jobs:
+  test:
+    name: Tests (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+        with:
+          toolchain: stable
+          components: clippy
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      # No dependency install scripts: nothing in the build needs them.
+      - name: Install frontend dependencies
+        working-directory: apps/desktop
+        run: npm ci --ignore-scripts
+
+      # Type check + vite build. The Tauri crate embeds apps/desktop/dist at
+      # compile time, so this must run before any cargo step.
+      - name: Build frontend
+        working-directory: apps/desktop
+        run: npm run build
+
+      - name: Rust tests
+        run: cargo test --workspace --locked
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Frontend tests
+        working-directory: apps/desktop
+        run: npm test
+
+      - name: Release script tests
+        run: node --test "scripts/*.test.mjs"

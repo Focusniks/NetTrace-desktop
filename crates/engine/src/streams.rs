@@ -75,8 +75,12 @@ pub fn list_flows(sh: &Shared, q: &FlowQuery) -> FlowPage {
         })
         .collect();
     list.sort_by(|a, b| {
-        let ord = (a.transport, sort_key(a, q.sort)).cmp(&(b.transport, sort_key(b, q.sort)));
-        let ord = if q.kind.is_some() { sort_key(a, q.sort).cmp(&sort_key(b, q.sort)) } else { ord };
+        // Stream ids are numbered per transport, so only the id order groups by it;
+        // any other key ranks TCP and UDP flows together.
+        let ord = match q.sort {
+            FlowSort::Id => (a.transport, sort_key(a, q.sort)).cmp(&(b.transport, sort_key(b, q.sort))),
+            _ => sort_key(a, q.sort).cmp(&sort_key(b, q.sort)).then(a.transport.cmp(&b.transport)),
+        };
         if q.desc { ord.reverse() } else { ord }
     });
     let total = list.len() as u32;

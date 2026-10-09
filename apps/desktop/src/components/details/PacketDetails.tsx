@@ -33,6 +33,7 @@ const DEFAULT_EXPANDED = new Set<string>();
 export function PacketDetails() {
   const detail = useStore((s) => s.detail);
   const loading = useStore((s) => s.detailLoading);
+  const loadError = useStore((s) => s.detailError);
   const selectedKey = useStore((s) => s.selectedFieldKey);
   const setHighlight = useStore((s) => s.setHighlight);
   const [expanded, setExpanded] = useState<Set<string>>(DEFAULT_EXPANDED);
@@ -40,19 +41,29 @@ export function PacketDetails() {
   const ref = useRef<HTMLDivElement>(null);
   const tree = detail?.tree;
 
-  // Reveal the node selected from the hex view.
+  // Reveal the node selected from the hex view (once per selection: the user
+  // may collapse its parents afterwards).
   useEffect(() => {
     if (!tree || !selectedKey) return;
-    const need = ancestorKeys(tree, selectedKey).filter((k) => !expanded.has(k));
-    if (need.length) setExpanded((prev) => new Set([...prev, ...need]));
-  }, [tree, selectedKey, expanded]);
+    setExpanded((prev) => {
+      const need = ancestorKeys(tree, selectedKey).filter((k) => !prev.has(k));
+      return need.length ? new Set([...prev, ...need]) : prev;
+    });
+  }, [tree, selectedKey]);
 
   const flat = useMemo(() => (tree ? flatten(tree, expanded) : []), [tree, expanded]);
 
+  // Scroll a newly selected node into view once it is rendered; expanding or
+  // collapsing other nodes afterwards must not yank the scroll position.
+  const scrolledKey = useRef<string | null>(null);
   useEffect(() => {
-    if (!selectedKey || !ref.current) return;
+    // Paths repeat across packets: a cleared selection must allow the same path again.
+    if (!selectedKey) scrolledKey.current = null;
+    if (!selectedKey || selectedKey === scrolledKey.current || !ref.current) return;
     const el = ref.current.querySelector<HTMLElement>(`[data-path="${selectedKey}"]`);
-    el?.scrollIntoView({ block: "nearest" });
+    if (!el) return;
+    el.scrollIntoView({ block: "nearest" });
+    scrolledKey.current = selectedKey;
   }, [selectedKey, flat]);
 
   const toggle = (k: string, open?: boolean) =>
@@ -157,6 +168,7 @@ export function PacketDetails() {
   };
 
   if (!detail) {
+    if (loadError && !loading) return <div className="tool-note tool-error" role="alert">{t("details.error", { error: loadError })}</div>;
     return <div className="tool-note">{loading ? t("details.loading") : t("details.empty")}</div>;
   }
 

@@ -115,7 +115,18 @@ impl AppDissector for Dns {
     }
 
     fn accepts(&self, payload: &[u8], transport: Transport) -> bool {
-        payload.len() >= if transport == Transport::Tcp { 14 } else { 12 }
+        if transport != Transport::Tcp {
+            return payload.len() >= 12;
+        }
+        // Without TCP reassembly, later segments of a long message reach us
+        // too: accept only a plausible length prefix + header.
+        if payload.len() < 14 {
+            return false;
+        }
+        let be = |i: usize| usize::from(u16::from_be_bytes([payload[i], payload[i + 1]]));
+        let (len, flags, qd, records) = (be(0), be(4), be(6), be(8) + be(10) + be(12));
+        let opcode = (flags >> 11) & 0x0f;
+        len >= 12 && matches!(opcode, 0 | 1 | 2 | 4 | 5 | 6) && qd * 5 + records * 11 <= len - 12
     }
 
     fn dissect(&self, ctx: &mut Ctx, layer: Layer, transport: Transport) -> Result<(), Malformed> {
@@ -128,6 +139,10 @@ impl AppDissector for Dns {
             let len = c.be_u16().map_err(m(P))?;
             tcp_len = Some(len);
             start += 2;
+            if start + usize::from(len) > end {
+                // The message continues in the next segment(s).
+                ctx.incomplete = true;
+            }
             end = end.min(start + usize::from(len));
         }
         let msg = layer.frame.get(start..end).unwrap_or(&[]);

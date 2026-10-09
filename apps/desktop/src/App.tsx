@@ -17,13 +17,29 @@ import { commands } from "./state/commands";
 import { syncColoringRules, useStore } from "./state/store";
 import { checkForUpdates } from "./state/updater";
 
+/**
+ * Key of a shortcut. Uses the character for Latin layouts (AZERTY etc.) and
+ * the physical key otherwise, so Ctrl+O also works with the Russian layout
+ * (where the character is "щ").
+ */
+function shortcutKey(e: KeyboardEvent): string {
+  const k = e.key.toLowerCase();
+  // AltGr (= Ctrl+Alt on Windows) types characters such as "€": not a shortcut.
+  if (/^[a-z/]$/.test(k) || e.altKey) return k;
+  if (/^Key[A-Z]$/.test(e.code)) return e.code.slice(3).toLowerCase();
+  if (e.code === "Slash") return "/";
+  return k;
+}
+
 function useGlobalShortcuts() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // A dialog is modal: shortcuts must not close files or open pickers behind it.
+      if (useStore.getState().dialog) return;
       const target = e.target as HTMLElement | null;
       const typing = target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT");
       const ctrl = e.ctrlKey || e.metaKey;
-      const key = e.key.toLowerCase();
+      const key = shortcutKey(e);
       if (ctrl && key === "o") {
         e.preventDefault();
         void commands.open();
@@ -51,7 +67,7 @@ function useGlobalShortcuts() {
       } else if (ctrl && key === "t") {
         e.preventDefault();
         commands.dock("timeline");
-      } else if (ctrl && (key === "/" || key === "k")) {
+      } else if (ctrl && key === "/") {
         e.preventDefault();
         commands.focusFilter();
       } else if (e.altKey && e.key === "ArrowLeft") {

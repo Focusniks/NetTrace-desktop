@@ -385,3 +385,64 @@ fn snaplen_truncated_tcp_keeps_wire_length() {
     let d = dissect(cut, &ctx(LinkType::Ethernet, cut.len()), DissectOptions::FULL);
     assert!(matches!(d.summary.transport, Some(TransportInfo::Tcp(_))));
 }
+
+#[test]
+fn messages_cut_by_segmentation_are_not_malformed() {
+    // A ClientHello larger than one segment: only its first part is here.
+    let hello = build::tls_client_hello("api.example.com");
+    for cut in [5 + 4 + 20, 5 + 4 + 40, 5 + 4 + 45, hello.len() - 3] {
+        let f = tcp_frame(tcpf::PSH | tcpf::ACK, &hello[..cut], 443);
+        let d = full(&f);
+        assert!(!d.summary.malformed, "cut at {cut}: {}", d.info);
+        assert!(d.info.starts_with("Client Hello"), "cut at {cut}: {}", d.info);
+    }
+    let f = tcp_frame(tcpf::PSH | tcpf::ACK, &hello[..hello.len() - 3], 443);
+    assert_eq!(full(&f).info, "Client Hello (SNI=api.example.com)");
+
+    // DNS over TCP: the first segment of a long response and a later one.
+    let mut msg = build::dns_response_a(7, "api.example.com", Some("edge.example.net"), [192, 0, 2, 1]);
+    let mut tcp_dns = (msg.len() as u16).to_be_bytes().to_vec();
+    tcp_dns.append(&mut msg);
+    let first = tcp_frame(tcpf::PSH | tcpf::ACK, &tcp_dns[..40], 53);
+    let d = full(&first);
+    assert!(!d.summary.malformed, "{}", d.info);
+    assert_eq!(d.summary.top, Some(ProtocolId::Dns));
+    let later = tcp_frame(tcpf::PSH | tcpf::ACK, &[0x5a; 60], 53);
+    let d = full(&later);
+    assert!(!d.summary.malformed, "{}", d.info);
+    assert_ne!(d.summary.top, Some(ProtocolId::Dns));
+    let whole = tcp_frame(tcpf::PSH | tcpf::ACK, &tcp_dns, 53);
+    assert!(full(&whole).info.starts_with("Standard query response"));
+}
+
+#[test]
+fn first_ip_fragment_is_not_malformed() {
+    let dns = build::dns_response_a(7, "api.example.com", Some("edge.example.net"), [192, 0, 2, 1]);
+    let udp = build::udp(53, 5000, &dns);
+    let mut ip = build::ipv4(SERVER.ip, CLIENT.ip, 17, 9, 64, &udp[..48]);
+    ip[6..8].copy_from_slice(&0x2000u16.to_be_bytes()); // MF, offset 0
+    let d = full(&build::ethernet(CLIENT.mac, SERVER.mac, build::ETH_IPV4, &ip));
+    assert!(!d.summary.malformed, "{}", d.info);
+    assert!(d.summary.protocols.contains(ProtocolId::Udp));
+    assert!(d.info.contains("[Unreassembled]"), "{}", d.info);
+
+    // Invalid data is still malformed in a cut payload (here a name pointer loop).
+    let mut looped = vec![0, 7, 0x01, 0x00, 0, 1, 0, 0, 0, 0, 0, 0, 0xc0, 12, 0, 1, 0, 1];
+    looped.resize(40, 0);
+    let mut ip = build::ipv4(CLIENT.ip, SERVER.ip, 17, 10, 64, &build::udp(5000, 53, &looped));
+    ip[6..8].copy_from_slice(&0x2000u16.to_be_bytes());
+    let d = full(&build::ethernet(SERVER.mac, CLIENT.mac, build::ETH_IPV4, &ip));
+    assert!(d.summary.malformed, "{}", d.info);
+}
+
+#[test]
+fn windows_loopback_ipv6() {
+    let lo: [u8; 16] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1];
+    let ip = build::ipv6(lo, lo, 17, 64, &build::udp(1, 53, &build::dns_query(1, "a.b", 1)));
+    for family in [23u32, 10] {
+        let mut frame = family.to_le_bytes().to_vec();
+        frame.extend_from_slice(&ip);
+        let d = dissect(&frame, &ctx(LinkType::Null, frame.len()), DissectOptions::FULL);
+        assert_eq!(d.summary.top, Some(ProtocolId::Dns), "family {family}");
+    }
+}

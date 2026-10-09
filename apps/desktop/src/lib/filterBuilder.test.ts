@@ -9,6 +9,8 @@ describe("conditionToFilter", () => {
     expect(conditionToFilter({ field: "protocol", op: "present", value: "tcp", join: "and" })).toBe("tcp");
     expect(conditionToFilter({ field: "protocol", op: "absent", value: "arp", join: "and" })).toBe("!arp");
     expect(conditionToFilter({ field: "dstport", op: "eq", value: "443", join: "and" })).toBe("(tcp.dstport == 443 || udp.dstport == 443)");
+    expect(conditionToFilter({ field: "srcport", op: "ne", value: "53", join: "and" })).toBe("!(tcp.srcport == 53 || udp.srcport == 53)");
+    expect(conditionToFilter({ field: "port", op: "ne", value: "53", join: "and" })).toBe("!(tcp.port == 53 || udp.port == 53)");
     expect(conditionToFilter({ field: "sni", op: "contains", value: 'a"b', join: "and" })).toBe('tls.handshake.extensions_server_name contains "a\\"b"');
     expect(conditionToFilter({ field: "flags", op: "present", value: "syn", join: "and" })).toBe("tcp.flags.syn == 1");
   });

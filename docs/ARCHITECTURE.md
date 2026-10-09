@@ -13,7 +13,7 @@ crates/
   model/                 DTO-контракт backend ↔ UI (Packet, Flow, Host, Conversation,
                          Protocol, TimelineEvent, PacketField …). Только serde.
   packet/                безопасный байтовый курсор, адреса (MAC/IPv4/IPv6), link types, время
-  capture/               потоковое чтение PCAP/PCAPNG (+ запись PCAP), трейт PacketSource
+  capture/               потоковое чтение PCAP/PCAPNG, запись PCAP/PCAPNG (экспорт), трейт PacketSource
   live/                  живой захват: Npcap/libpcap загружается в рантайме (единственный
                          модуль с unsafe — FFI), список интерфейсов, BPF-фильтр захвата
   protocol/              диссекторы и реестр (Ethernet, 802.1Q, ARP, IPv4/6, ICMP/v6,
@@ -38,7 +38,8 @@ packet ◄── capture    │
   ▲   ◄── protocol    ├── engine ◄── desktop (src-tauri)
   ├──── flow ◄────────┤
   ├──── storage ◄─────┤
-  └──── analysis ◄────┤
+  ├──── analysis ◄────┤
+  └──── live ◄────────┤
 model ◄── query ◄─────┘
 ```
 
@@ -50,7 +51,7 @@ model ◄── query ◄─────┘
 ```
 PCAP/PCAPNG ──► capture::CaptureReader (BufReader, последовательно, offset каждой записи)
              ──► protocol::dissect (режим Summary: без дерева и строк)
-             ──► batch (8192 пакета) ──► write-lock индекса:
+             ──► batch (4096 пакетов; при живом захвате — сразу) ──► write-lock индекса:
                     storage::PacketIndex.push(PacketMeta 64 байта)
                     flow::FlowTable.process  → stream id, флаги TCP-анализа, RTT
                     analysis::Accumulators   → узлы, соединения, иерархия, события
@@ -108,7 +109,8 @@ PCAP — недоверенный вход. Весь разбор идёт че�
 * Новый диссектор: реализовать `protocol::Dissector`/`AppDissector`, зарегистрировать
   в `Registry::with_builtins`, добавить поля в `protocol::fields`. UI не меняется —
   дерево деталей и фильтр работают по общей модели.
-* Live capture: реализовать `capture::PacketSource` поверх libpcap/Npcap; движок
-  принимает любой источник записей.
+* Новый источник живого захвата: реализовать `live::LiveSource` (как Npcap/libpcap
+  в `live::ffi` или `ReplaySource` для тестов). Запись идёт во временный PCAP, который
+  индексируется как обычный файл.
 * Английский язык: `apps/desktop/src/i18n` — словари; диссекторы отдают
   языконезависимые id полей, подписи переводит UI.

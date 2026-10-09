@@ -44,7 +44,7 @@ export function Toolbar() {
       <Btn icon="down" title="toolbar.next" disabled={none} onClick={commands.next} />
       <Btn icon="last" title="toolbar.last" disabled={none} onClick={commands.last} />
       <span className="tb-sep" />
-      <Btn icon="search" title="toolbar.find" disabled={none} active={searchOpen} onClick={commands.find} />
+      <Btn icon="search" title="toolbar.find" disabled={none} active={searchOpen} onClick={() => useStore.getState().setSearchOpen(!searchOpen)} />
       <Btn icon="palette" title="toolbar.colorize" active={colorize} onClick={commands.toggleColorize} />
     </div>
   );

@@ -20,6 +20,7 @@ export function HexView() {
   const detail = useStore((s) => s.detail);
   const highlight = useStore((s) => s.highlight);
   const hasDetail = useStore((s) => s.detail != null);
+  const loadError = useStore((s) => s.detailError);
   const setHighlight = useStore((s) => s.setHighlight);
   const ref = useRef<HTMLDivElement>(null);
   const [scrollTop, setScrollTop] = useState(0);
@@ -31,6 +32,8 @@ export function HexView() {
     const ro = new ResizeObserver(() => setViewport(el.clientHeight));
     ro.observe(el);
     setViewport(el.clientHeight);
+    // A new scroll element starts at the top: drop the old element's position.
+    setScrollTop(el.scrollTop);
     return () => ro.disconnect();
     // The scroll element only exists once a packet is shown.
   }, [hasDetail]);
@@ -44,7 +47,7 @@ export function HexView() {
     if (y < el.scrollTop || y + LINE_H > el.scrollTop + el.clientHeight) el.scrollTop = Math.max(0, y - LINE_H);
   }, [highlight]);
 
-  if (!detail) return <div className="tool-note">{t("hex.empty")}</div>;
+  if (!detail) return <div className="tool-note">{loadError ? t("hex.unavailable") : t("hex.empty")}</div>;
   const bytes = detail.bytes;
   const lines = Math.ceil(bytes.length / PER_LINE);
   const offDigits = bytes.length > 0xffff ? 8 : 4;
@@ -116,8 +119,4 @@ export function HexView() {
       </div>
     </div>
   );
-}
-
-export function hexSelectionLabel(start: number, len: number): string {
-  return t("hex.selected", { start, end: start + len - 1, len });
 }

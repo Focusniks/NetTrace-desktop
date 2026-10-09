@@ -9,10 +9,16 @@ interface Props {
   children: ReactNode;
   footer?: ReactNode;
   width?: number;
+  /** False for dialogs with edits a stray click outside must not discard. */
+  dismissOnBackdrop?: boolean;
 }
 
-export function Dialog({ title, onClose, children, footer, width }: Props) {
+const FOCUSABLE = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+export function Dialog({ title, onClose, children, footer, width, dismissOnBackdrop = true }: Props) {
   const ref = useRef<HTMLDivElement>(null);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null;
     // Focus an element marked data-autofocus, else the first field, else the
@@ -29,7 +35,21 @@ export function Dialog({ title, onClose, children, footer, width }: Props) {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation();
-        onClose();
+        closeRef.current();
+      } else if (e.key === "Tab" && root) {
+        // Keep focus inside the dialog (it is modal).
+        const items = [...root.querySelectorAll<HTMLElement>(FOCUSABLE)];
+        const active = document.activeElement as HTMLElement | null;
+        const inside = active != null && root.contains(active);
+        if (items.length === 0) {
+          e.preventDefault();
+        } else if (e.shiftKey && (!inside || active === items[0] || active === root)) {
+          e.preventDefault();
+          items[items.length - 1].focus();
+        } else if (!e.shiftKey && (!inside || active === items[items.length - 1])) {
+          e.preventDefault();
+          items[0].focus();
+        }
       }
     };
     window.addEventListener("keydown", onKey, true);
@@ -37,10 +57,10 @@ export function Dialog({ title, onClose, children, footer, width }: Props) {
       window.removeEventListener("keydown", onKey, true);
       prev?.focus?.();
     };
-  }, [onClose]);
+  }, []);
 
   return (
-    <div className="dialog-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div className="dialog-backdrop" onMouseDown={(e) => dismissOnBackdrop && e.target === e.currentTarget && onClose()}>
       <div ref={ref} className="dialog" tabIndex={-1} role="dialog" aria-modal="true" aria-label={title} style={width ? { width } : undefined}>
         <div className="dialog-title">
           <span>{title}</span>

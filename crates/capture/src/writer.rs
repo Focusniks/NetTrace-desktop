@@ -43,7 +43,7 @@ impl<W: Write> PcapWriter<W> {
     }
 }
 
-/// Minimal little-endian pcapng writer (used by tests and fixtures).
+/// Minimal little-endian pcapng writer (export and test fixtures).
 pub struct PcapNgWriter<W: Write> {
     out: W,
     interfaces: u32,

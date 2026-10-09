@@ -17,7 +17,8 @@ const P: ProtocolId = ProtocolId::Loopback;
 fn family_name(fam: u32) -> &'static str {
     match fam {
         2 => "IP",
-        24 | 28 | 30 => "IPv6",
+        // 10: Linux AF_INET6, 23: Windows (Npcap loopback), 24/28/30: BSDs and macOS.
+        10 | 23 | 24 | 28 | 30 => "IPv6",
         _ => "Unknown",
     }
 }
@@ -46,7 +47,7 @@ impl Dissector for Null {
         t.close();
         let ethertype = match fam {
             2 => 0x0800,
-            24 | 28 | 30 => 0x86dd,
+            10 | 23 | 24 | 28 | 30 => 0x86dd,
             _ => return Ok(Handoff::Data { start: start + 4, end: layer.end }),
         };
         Ok(Handoff::Ethertype { ethertype, start: start + 4, end: layer.end })

@@ -5,7 +5,7 @@ import { fmtBytes, fmtInt } from "../../lib/format";
 import { applyFilterText, copy } from "../../state/actions";
 import { useStore } from "../../state/store";
 import { Icon } from "../common/Icon";
-import { useBackend } from "./useBackend";
+import { QueryError, useBackend } from "./useBackend";
 
 /** Indicator → localized title + factual sentence. */
 export function describeIndicator(ind: Indicator): { title: string; facts: string } {
@@ -23,7 +23,7 @@ export function describeIndicator(ind: Indicator): { title: string; facts: strin
 }
 
 export function IndicatorsPanel() {
-  const { data, reload } = useBackend(() => api.indicators(), [], 0);
+  const { data, error, loading, reload } = useBackend(() => api.indicators(), [], 0);
   const list = data ?? [];
   return (
     <div className="col" style={{ flex: 1, minHeight: 0 }}>
@@ -35,7 +35,9 @@ export function IndicatorsPanel() {
         </button>
       </div>
       <div className="tool-body">
-        {list.length === 0 ? <div className="tool-note">{t("ind.none")}</div> : null}
+        <QueryError error={error} />
+        {data == null && loading ? <div className="tool-note">{t("common.loading")}</div> : null}
+        {data?.length === 0 ? <div className="tool-note">{t("ind.none")}</div> : null}
         <div className="ind-list">
           {list.map((ind, i) => {
             const d = describeIndicator(ind);

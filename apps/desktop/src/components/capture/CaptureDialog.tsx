@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import { t } from "../../i18n";
-import { useStore } from "../../state/store";
+import { errorText, useStore } from "../../state/store";
 import { Dialog } from "../common/Dialog";
 import { Icon } from "../common/Icon";
 import { InterfaceList, useInterfaces } from "./InterfaceList";
@@ -30,7 +30,8 @@ export function CaptureDialog({ onClose, initial }: { onClose: () => void; initi
     };
     try {
       await useStore.getState().guardUnsaved(() => useStore.getState().startCapture(options));
-      onClose();
+      // guardUnsaved may have replaced this dialog with the "save packets?" question.
+      if (useStore.getState().dialog === "capture") onClose();
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -105,14 +106,24 @@ export function CaptureDialog({ onClose, initial }: { onClose: () => void; initi
 /** Asked before closing/replacing a live capture that was not saved. */
 export function UnsavedDialog({ onClose }: { onClose: () => void }) {
   const pending = useStore((s) => s.pendingAction);
-  const proceed = async () => {
+  const proceed = async (saved: boolean) => {
+    const before = useStore.getState().capture?.captureId;
+    // The action must not ask again; it usually replaces or closes the capture.
     useStore.setState({ liveSaved: true, pendingAction: null, dialog: null });
-    if (pending) await pending();
+    try {
+      if (pending) await pending();
+    } catch (e) {
+      useStore.getState().flash(t("common.error", { message: errorText(e) }));
+    } finally {
+      // Still the same unsaved capture (action failed or was cancelled): keep asking next time.
+      if (!saved && useStore.getState().capture?.captureId === before) useStore.setState({ liveSaved: false });
+    }
   };
   const save = async () => {
     const { commands } = await import("../../state/commands");
-    const saved = await commands.exportView();
-    if (saved) await proceed();
+    // The question is about the whole capture, not just the filtered view.
+    const saved = await commands.exportView(true);
+    if (saved) await proceed(true);
   };
   return (
     <Dialog
@@ -127,7 +138,7 @@ export function UnsavedDialog({ onClose }: { onClose: () => void }) {
           <button className="btn" onClick={() => useStore.setState({ pendingAction: null, dialog: null })}>
             {t("dialog.cancel")}
           </button>
-          <button className="btn" onClick={() => void proceed()}>
+          <button className="btn" onClick={() => void proceed(false)}>
             {t("unsaved.discard")}
           </button>
           <button className="btn btn-primary" onClick={() => void save()}>

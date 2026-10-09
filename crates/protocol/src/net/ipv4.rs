@@ -170,6 +170,10 @@ impl Dissector for Ipv4 {
             });
             return Ok(Handoff::Data { start: start + ihl, end });
         }
+        if mf {
+            // First fragment: the upper layers see only part of the datagram.
+            ctx.incomplete = true;
+        }
         ctx.info.set(P, || format!("IPv4 protocol {} ({proto})", names::ip_proto(proto)));
         Ok(Handoff::IpProto { proto, start: start + ihl, end })
     }

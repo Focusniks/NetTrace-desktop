@@ -1,7 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { BackendError } from "../../api/client";
 import { t } from "../../i18n";
-import { useStore } from "../../state/store";
+import { errorText, useStore } from "../../state/store";
+import { filterErrorText } from "../filter/FilterBar";
+
+/** A failed panel query, shown in place of an empty ("nothing found") result. */
+export function QueryError({ error }: { error: string | null }) {
+  return error ? (
+    <div className="tool-note tool-error" role="alert">
+      {t("common.error", { message: error })}
+    </div>
+  ) : null;
+}
 
 /**
  * Loads data from the backend for a tool panel. Reloads when the capture
@@ -9,8 +20,8 @@ import { useStore } from "../../state/store";
  * and on demand (`reload`).
  *
  * Data from a previous query (other stream, other filter) is dropped as soon
- * as the query changes, and failures are reported instead of leaving stale
- * numbers on screen.
+ * as the query changes, and failures are returned as `error` (render it with
+ * `QueryError`) instead of leaving stale numbers on screen.
  */
 export function useBackend<T>(fetcher: () => Promise<T>, deps: unknown[], liveMs = 2000) {
   const captureId = useStore((s) => s.progress?.captureId ?? 0);
@@ -40,8 +51,7 @@ export function useBackend<T>(fetcher: () => Promise<T>, deps: unknown[], liveMs
       .catch((e: Error) => {
         if (my !== seq.current || (e as { code?: string }).code === "cancelled") return;
         setData(null);
-        setError(e.message);
-        useStore.getState().flash(t("common.error", { message: e.message }));
+        setError(e instanceof BackendError && e.filter ? filterErrorText(e.filter) : errorText(e));
       })
       .finally(() => {
         if (my === seq.current) {
@@ -55,6 +65,7 @@ export function useBackend<T>(fetcher: () => Promise<T>, deps: unknown[], liveMs
   // A different query must not show the previous query's result.
   useEffect(() => {
     setData(null);
+    setError(null);
   }, [reload]);
 
   useEffect(() => {

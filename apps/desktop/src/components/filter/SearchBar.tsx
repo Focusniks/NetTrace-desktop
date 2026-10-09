@@ -3,9 +3,10 @@ import { useEffect, useRef, useState } from "react";
 import { api, BackendError } from "../../api/client";
 import type { SearchQuery } from "../../api/types";
 import { t, type MessageKey } from "../../i18n";
-import { useStore } from "../../state/store";
+import { errorText, useStore } from "../../state/store";
 import { Icon } from "../common/Icon";
 import { Select } from "../common/Select";
+import { filterErrorText } from "./FilterBar";
 
 type Kind = "text" | "hex" | "filter" | "ip" | "mac" | "port" | "protocol" | "number" | "domain" | "httpHost" | "sni";
 const KINDS: Kind[] = ["text", "domain", "ip", "mac", "port", "protocol", "httpHost", "sni", "hex", "filter", "number"];
@@ -53,6 +54,7 @@ export function SearchBar() {
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const busyRef = useRef(false);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -67,7 +69,9 @@ export function SearchBar() {
       return;
     }
     const q = toQuery(kind, text, caseSensitive);
-    if (!q || !s.capture) return;
+    // One search at a time: repeated Enter would start every run from the same row.
+    if (!q || !s.capture || busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     try {
       const hit = await api.search(s.viewId, s.selectedRow, backwards, q);
@@ -77,8 +81,9 @@ export function SearchBar() {
         await s.selectPacket(hit.number);
       }
     } catch (e) {
-      setNote(e instanceof BackendError && e.filter ? e.message : String((e as Error).message ?? e));
+      setNote(e instanceof BackendError && e.filter ? filterErrorText(e.filter) : errorText(e));
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   };
@@ -94,6 +99,7 @@ export function SearchBar() {
         minWidth={200}
       />
       <input autoComplete="off"
+        id="packet-search"
         ref={inputRef}
         className="input mono"
         value={text}

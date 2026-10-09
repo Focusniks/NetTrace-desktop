@@ -110,11 +110,6 @@ pub async fn apply_view(state: State<'_, AppState>, filter: Option<String>, sort
 }
 
 #[tauri::command]
-pub async fn view_len(state: State<'_, AppState>, view_id: u64) -> CmdResult<u32> {
-    blocking(&state, move |e| e.view_len(view_id)).await
-}
-
-#[tauri::command]
 pub async fn get_rows(state: State<'_, AppState>, view_id: u64, offset: u32, limit: u32) -> CmdResult<Vec<PacketRow>> {
     blocking(&state, move |e| e.rows(view_id, offset, limit)).await
 }

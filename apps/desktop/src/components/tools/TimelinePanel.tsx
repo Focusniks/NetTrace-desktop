@@ -6,7 +6,7 @@ import { t, type MessageKey } from "../../i18n";
 import { filterByTerm } from "../../state/actions";
 import { useStore } from "../../state/store";
 import { VirtualTable, type VColumn } from "../common/VirtualTable";
-import { useBackend } from "./useBackend";
+import { QueryError, useBackend } from "./useBackend";
 
 const LABEL_W = 118;
 const LANE_H = 30;
@@ -46,7 +46,7 @@ export function TimelinePanel() {
   const selectedNumber = useStore((s) => s.selectedNumber);
   const buckets = Math.max(20, Math.floor((width - LABEL_W) / 3));
 
-  const { data } = useBackend(() => api.timeline(range?.start ?? null, range?.end ?? null, buckets, 3000), [range?.start, range?.end, buckets]);
+  const { data, error } = useBackend(() => api.timeline(range?.start ?? null, range?.end ?? null, buckets, 3000), [range?.start, range?.end, buckets]);
 
   useEffect(() => {
     const el = wrapRef.current;
@@ -166,6 +166,7 @@ export function TimelinePanel() {
 
   return (
     <div className="timeline">
+      <QueryError error={error} />
       <div className="tool-bar">
         <span className="muted">{t("timeline.hint")}</span>
         <span className="grow" />

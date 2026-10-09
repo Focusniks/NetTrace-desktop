@@ -128,6 +128,25 @@ mod tests {
     }
 
     #[test]
+    fn long_chains_are_bounded_and_do_not_overflow() {
+        let chain = |n: usize, op: &str| vec!["udp"; n - 1].join(op) + op + "tcp";
+        let too_long = chain(5_000, " || ");
+        assert_eq!(Filter::compile(&too_long, &Reg).unwrap_err().code, ErrorCode::TooComplex);
+        // The longest accepted chains compile, evaluate and drop on a small stack.
+        std::thread::Builder::new()
+            .stack_size(256 * 1024)
+            .spawn(move || {
+                for op in [" || ", " && "] {
+                    let f = Filter::compile(&chain(4096, op), &Reg).unwrap();
+                    assert_eq!(f.matches(&mut pkt()), op == " || ");
+                }
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
+
+    #[test]
     fn compile_errors() {
         let code = |f: &str| Filter::compile(f, &Reg).unwrap_err().code;
         assert_eq!(code("foo.bar"), ErrorCode::UnknownField);

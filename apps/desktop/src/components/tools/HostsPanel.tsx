@@ -9,7 +9,7 @@ import { applyFilterText, copy, filterByTerm } from "../../state/actions";
 import { showContextMenu } from "../common/ContextMenu";
 import { Icon } from "../common/Icon";
 import { VirtualTable, type VColumn } from "../common/VirtualTable";
-import { useBackend } from "./useBackend";
+import { QueryError, useBackend } from "./useBackend";
 
 const COLS: VColumn<HostRow>[] = [
   { id: "address", title: t("hosts.col.address"), width: 200, mono: true, render: (h) => h.address, sortValue: (h) => h.address },
@@ -24,7 +24,7 @@ const COLS: VColumn<HostRow>[] = [
 ];
 
 export function HostsPanel() {
-  const { data, reload } = useBackend(() => api.hosts(), []);
+  const { data, error, reload } = useBackend(() => api.hosts(), []);
   const [selected, setSelected] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const rows = useMemo(() => {
@@ -42,6 +42,7 @@ export function HostsPanel() {
           <Icon name="refresh" />
         </button>
       </div>
+      <QueryError error={error} />
       <div className="tool-body" style={{ overflow: "hidden" }}>
         <VirtualTable
           columns={COLS}

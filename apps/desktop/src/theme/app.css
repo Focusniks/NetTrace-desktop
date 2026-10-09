@@ -162,6 +162,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .statusbar .sb-strong { color: var(--text); }
 .statusbar .sb-warn { color: var(--warn); }
 .statusbar .sb-error { color: var(--error); }
+.tool-error, .tool-note.tool-error { color: var(--error); }
 .statusbar .sb-msg { color: var(--accent-strong); overflow: hidden; text-overflow: ellipsis; }
 .progress { width: 120px; height: 6px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 3px; overflow: hidden; }
 .progress > div { height: 100%; background: var(--accent); transition: width .2s linear; }

@@ -193,17 +193,25 @@ export async function installUpdate(): Promise<void> {
     }
     // A running capture is stopped first; unsaved packets are offered for saving.
     await stopAndWait();
+    // The action may run later from the "save packets?" dialog, outside this
+    // try block, so it reports its own failures.
     await useStore.getState().guardUnsaved(async () => {
-      useUpdate.setState({ status: "installing" });
-      useStore.getState().setDialog("update");
-      // Close a live capture so its temporary file is removed before the app
-      // exits; an opened file stays open in case the install fails.
-      if (useStore.getState().capture?.live) await useStore.getState().closeFile();
-      // On Windows the installer takes over and the app exits here; the
-      // installer starts the new version itself.
-      await update.install();
-      const { relaunch } = await import("@tauri-apps/plugin-process");
-      await relaunch();
+      try {
+        useUpdate.setState({ status: "installing" });
+        useStore.getState().setDialog("update");
+        // Close a live capture so its temporary file is removed before the app
+        // exits; an opened file stays open in case the install fails.
+        if (useStore.getState().capture?.live) await useStore.getState().closeFile();
+        // On Windows the installer takes over and the app exits here; the
+        // installer starts the new version itself.
+        await update.install();
+        const { relaunch } = await import("@tauri-apps/plugin-process");
+        await relaunch();
+      } catch (e) {
+        const message = errorText(e);
+        useUpdate.setState({ status: "error", error: message });
+        report(t("update.error", { message }));
+      }
     });
   } catch (e) {
     const message = errorText(e);

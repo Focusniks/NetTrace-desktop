@@ -55,6 +55,7 @@ impl Dissector for Ipv6 {
 
         let mut pos = start + 40;
         let mut header_len = 40;
+        let mut first_fragment = false;
         for _ in 0..MAX_EXT_HEADERS {
             if !matches!(nxt, 0 | 43 | 44 | 60) {
                 break;
@@ -81,7 +82,7 @@ impl Dissector for Ipv6 {
                 t.add(&f::IPV6_FRAG_ID, pos + 4, 4, FieldValue::U64(u64::from(ident)), || format!("0x{ident:08x}"));
                 if offset != 0 {
                     t.close();
-                    t.set_len(header_len);
+                    t.set_len(header_len + size);
                     t.close();
                     let proto = next;
                     ctx.info.set(P, || {
@@ -89,6 +90,8 @@ impl Dissector for Ipv6 {
                     });
                     return Ok(Handoff::Data { start: pos + 8, end });
                 }
+                // First fragment: the upper layers see only part of the datagram.
+                first_fragment = more;
             } else {
                 t.uint(&f::IPV6_EXT_LEN, pos + 1, 1, u64::from(len_byte));
             }
@@ -99,6 +102,7 @@ impl Dissector for Ipv6 {
         }
         t.set_len(header_len);
         t.close();
+        ctx.incomplete |= first_fragment;
         if nxt == 59 {
             ctx.info.set(P, || "IPv6 no next header".to_owned());
             return Ok(Handoff::Done);

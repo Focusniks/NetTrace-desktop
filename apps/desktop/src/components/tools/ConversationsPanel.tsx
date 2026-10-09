@@ -9,7 +9,7 @@ import { useStore } from "../../state/store";
 import { showContextMenu } from "../common/ContextMenu";
 import { Icon } from "../common/Icon";
 import { VirtualTable, type VColumn } from "../common/VirtualTable";
-import { useBackend } from "./useBackend";
+import { QueryError, useBackend } from "./useBackend";
 
 const KINDS: ConversationKind[] = ["eth", "ip", "tcp", "udp"];
 
@@ -34,7 +34,7 @@ function columns(kind: ConversationKind): VColumn<ConversationRow>[] {
 export function ConversationsPanel() {
   const [kind, setKind] = useState<ConversationKind>("tcp");
   const [selected, setSelected] = useState<string | null>(null);
-  const { data, reload } = useBackend(() => api.conversations(kind), [kind]);
+  const { data, error, reload } = useBackend(() => api.conversations(kind), [kind]);
   const cols = useMemo(() => columns(kind), [kind]);
   const key = (c: ConversationRow) => `${c.a}|${c.aPort}|${c.b}|${c.bPort}|${c.stream?.id ?? ""}`;
 
@@ -54,6 +54,7 @@ export function ConversationsPanel() {
           <Icon name="refresh" />
         </button>
       </div>
+      <QueryError error={error} />
       <div className="tool-body" style={{ overflow: "hidden" }}>
         <VirtualTable
           key={kind}

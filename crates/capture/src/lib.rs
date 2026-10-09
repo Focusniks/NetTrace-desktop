@@ -1,8 +1,8 @@
 //! Capture sources.
 //!
-//! The MVP reads existing PCAP/PCAPNG files. Live capture (libpcap/Npcap) is
-//! expected to plug in later as another [`PacketSource`] implementation; the
-//! engine only depends on this trait.
+//! Reads PCAP/PCAPNG files and writes them (export). Live capture lives in
+//! `nettrace-live`: it records to a temporary PCAP that is read through the
+//! same [`PacketSource`] trait the engine depends on.
 
 mod error;
 mod pcap;

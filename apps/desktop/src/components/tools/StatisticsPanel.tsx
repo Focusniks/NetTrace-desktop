@@ -11,7 +11,7 @@ import { showContextMenu } from "../common/ContextMenu";
 import { Icon } from "../common/Icon";
 import { Select } from "../common/Select";
 import { UPlotChart } from "./UPlotChart";
-import { useBackend } from "./useBackend";
+import { QueryError, useBackend } from "./useBackend";
 
 type Sub = "hierarchy" | "io" | "lengths";
 
@@ -34,7 +34,7 @@ export function StatisticsPanel() {
 }
 
 function Hierarchy() {
-  const { data } = useBackend(() => api.protocolHierarchy(), []);
+  const { data, error } = useBackend(() => api.protocolHierarchy(), []);
   const root = data?.[0];
   const totalPackets = root?.packets ?? 0;
   const totalBytes = root?.bytes ?? 0;
@@ -47,6 +47,7 @@ function Hierarchy() {
   };
   walk(data ?? [], 0);
 
+  if (error) return <QueryError error={error} />;
   return (
     <table className="dtable">
       <thead>
@@ -193,7 +194,7 @@ function IoGraphView() {
           <Icon name="refresh" />
         </button>
       </div>
-      {sel.error ? <div className="tool-note" style={{ color: "var(--error)" }}>{sel.error}</div> : null}
+      <QueryError error={all.error ?? sel.error} />
       {data ? (
         <UPlotChart
           data={data}
@@ -212,10 +213,11 @@ function IoGraphView() {
 function Lengths() {
   const appliedFilter = useStore((s) => s.appliedFilter);
   const [useFilter, setUseFilter] = useState(false);
-  const { data } = useBackend(() => api.packetLengths(useFilter ? appliedFilter || null : null), [useFilter, appliedFilter]);
+  const { data, error } = useBackend(() => api.packetLengths(useFilter ? appliedFilter || null : null), [useFilter, appliedFilter]);
   const max = Math.max(1, ...(data?.buckets.map((b) => b.count) ?? [1]));
   return (
     <div>
+      <QueryError error={error} />
       <div className="tool-bar" style={{ borderBottom: 0 }}>
         <label className="checkbox">
           <input type="checkbox" checked={useFilter} disabled={!appliedFilter} onChange={(e) => setUseFilter(e.target.checked)} />

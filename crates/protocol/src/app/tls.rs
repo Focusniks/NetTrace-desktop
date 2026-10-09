@@ -191,27 +191,33 @@ fn handshake(t: &mut Tree, fragment: &[u8], base: usize, facts: &mut Facts) -> R
         let body_len = len.min(c.remaining());
         let mut body = c.sub(body_len).map_err(m(P))?;
         let name = names::tls_handshake_type(ty);
+        let depth = t.depth();
         t.open(&f::TLS_HANDSHAKE, at, 4 + body_len);
         t.heading(|| format!("Handshake Protocol: {name}"));
         t.named(&f::TLS_HS_TYPE, at, 1, u64::from(ty), name);
         t.uint(&f::TLS_HS_LENGTH, at + 1, 3, len as u64);
-        let r = match ty {
+        let mut r = match ty {
             1 => hello(t, &mut body, true, facts),
             2 => hello(t, &mut body, false, facts),
             11 => certificates(t, &mut body),
             _ => Ok(()),
         };
-        if body_len < len {
+        // A message cut by TCP segmentation ends early by design: running out
+        // of bytes inside it is expected, not a sign of a malformed packet.
+        let continues = body_len < len;
+        if continues {
+            r = Ok(());
+            t.close_to(depth + 1);
             t.text(|| "[Handshake message continues in the next segment]".to_owned(), at, 0);
         }
-        t.close();
+        t.close_to(depth);
         let label = match (ty, &facts.sni) {
             (1, Some(sni)) => format!("Client Hello (SNI={sni})"),
             _ => name.to_owned(),
         };
         facts.messages.push(label);
         r?;
-        if body_len < len {
+        if continues {
             break;
         }
     }

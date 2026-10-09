@@ -113,7 +113,9 @@ impl Engine {
             let guard_progress = on_progress.clone();
             let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| indexer::run(session, reader, on_progress)));
             if run.is_err() {
-                // Never leave the UI waiting on an indexer that died.
+                // Never leave the UI waiting on an indexer that died, nor a
+                // recorder filling a file nobody indexes.
+                guard_session.cancel();
                 let mut p = guard_session.progress();
                 p.state = nettrace_model::IndexState::Failed;
                 p.error = Some("internal: indexer stopped unexpectedly".to_owned());

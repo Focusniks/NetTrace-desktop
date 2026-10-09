@@ -9,7 +9,7 @@ import { useStore } from "../../state/store";
 import { showContextMenu } from "../common/ContextMenu";
 import { Icon } from "../common/Icon";
 import { VirtualTable, type VColumn } from "../common/VirtualTable";
-import { useBackend } from "./useBackend";
+import { QueryError, useBackend } from "./useBackend";
 
 const COLS: (VColumn<FlowSummary> & { sort?: FlowSort })[] = [
   { id: "id", sort: "id", title: t("streams.col.id"), width: 70, align: "right", mono: true, render: (f) => `${f.kind} ${f.id}` },
@@ -39,7 +39,7 @@ export function StreamsPanel() {
   const focus = useStore((s) => s.focusStream);
   const flowSort = (COLS.find((c) => c.id === sort.id)?.sort ?? "id") as FlowSort;
 
-  const { data, reload } = useBackend(
+  const { data, error, reload } = useBackend(
     () => api.flows({ kind, sort: flowSort, desc: sort.desc, offset: 0, limit: 5000, search: search || null }),
     [kind, flowSort, sort.desc, search],
   );
@@ -62,6 +62,7 @@ export function StreamsPanel() {
           <Icon name="refresh" />
         </button>
       </div>
+      <QueryError error={error} />
       <div className="tool-body" style={{ overflow: "hidden" }}>
         <VirtualTable
           columns={COLS}
@@ -113,7 +114,8 @@ function PacketLink({ n }: { n: number | null | undefined }) {
 /** Objective facts about the focused stream. */
 export function StreamDetail() {
   const focus = useStore((s) => s.focusStream);
-  const { data: f } = useBackend(() => (focus ? api.flow(focus) : Promise.reject(new Error("no stream"))), [focus?.kind, focus?.id]);
+  const { data: f, error } = useBackend(() => (focus ? api.flow(focus) : Promise.resolve(null)), [focus?.kind, focus?.id]);
+  if (error) return <QueryError error={error} />;
   // Never show (and act on) the previous stream while the new one loads.
   if (!focus || !f || f.id !== focus.id || f.kind !== focus.kind) return null;
   const tcp = f.tcp;

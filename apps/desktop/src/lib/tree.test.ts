@@ -34,6 +34,12 @@ describe("tree helpers", () => {
     expect(deepestAt(tree, 50)).toBeNull();
   });
 
+  it("prefers the enclosing field over bit fields of the same bytes", () => {
+    // TCP flags: every flag bit node spans the same 2 bytes as "Flags".
+    const tcp = [f("tcp", 0, 20, [f("tcp.flags", 12, 2, [f("tcp.flags.syn", 12, 2), f("tcp.flags.fin", 12, 2)])])];
+    expect(deepestAt(tcp, 13)).toBe("0/0");
+  });
+
   it("resolves paths and ancestors", () => {
     expect(nodeAt(tree, "2/0/0")?.field).toBe("ip.flags.df");
     expect(nodeAt(tree, "9")).toBeNull();

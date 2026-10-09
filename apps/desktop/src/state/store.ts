@@ -53,6 +53,8 @@ interface State {
   historyPos: number;
   detail: PacketDetail | null;
   detailLoading: boolean;
+  /** Why the selected packet's details could not be loaded. */
+  detailError: string | null;
   highlight: Highlight | null;
   selectedFieldKey: string | null;
   // layout & tools
@@ -114,8 +116,57 @@ let detailSeq = 0;
 /** Tokens that let a newer filter/selection request win over a slower older one. */
 let applySeq = 0;
 let selectSeq = 0;
+/**
+ * Progress of a capture the backend already started but `openCapture` /
+ * `startCapture` has not returned yet: a small file can finish indexing (and
+ * send its only "done" event) before the command's response arrives.
+ */
+let earlyProgress: IndexProgress | null = null;
+/** Highest capture id the UI has adopted (ids only grow). */
+let lastCaptureId = 0;
 
-function errorText(e: unknown): string {
+/** State for a freshly opened (or closed) capture; also invalidates requests still in flight for the old one. */
+function freshCapture(get: () => State, info: CaptureInfo | null): Partial<State> {
+  applySeq++;
+  selectSeq++;
+  detailSeq++;
+  if (info) lastCaptureId = Math.max(lastCaptureId, info.captureId);
+  return {
+    capture: info,
+    liveSaved: false,
+    progress: null,
+    summary: null,
+    viewId: 0,
+    viewTotal: 0,
+    viewVersion: get().viewVersion + 1,
+    appliedFilter: "",
+    filterError: null,
+    filterBusy: false,
+    filterElapsed: null,
+    sort: null,
+    selectedNumber: null,
+    selectedRow: null,
+    history: [],
+    historyPos: -1,
+    detail: null,
+    detailLoading: false,
+    detailError: null,
+    highlight: null,
+    selectedFieldKey: null,
+    focusStream: null,
+    scrollRequest: null,
+    scrollReset: get().scrollReset + 1,
+  };
+}
+
+/** Applies progress that arrived before the capture became current. */
+function replayEarlyProgress(get: () => State, captureId: number) {
+  const early = earlyProgress;
+  earlyProgress = null;
+  if (early?.captureId === captureId) get().onProgress(early);
+}
+
+export function errorText(e: unknown): string {
   if (!(e instanceof BackendError)) return String(e);
   // Known codes get a Russian explanation; the backend detail is kept for the specialist.
   const key = `err.${e.code}` as MessageKey;
@@ -145,6 +196,7 @@ export const useStore = create<State>((set, get) => ({
   historyPos: -1,
   detail: null,
   detailLoading: false,
+  detailError: null,
   highlight: null,
   selectedFieldKey: null,
   dockOpen: false,
@@ -166,30 +218,10 @@ export const useStore = create<State>((set, get) => ({
       const info = await api.openCapture(path);
       const recent = [path, ...get().settings.recentFiles.filter((p) => p !== path)].slice(0, 10);
       get().updateSettings({ recentFiles: recent });
-      set({
-        capture: info,
-        liveSaved: false,
-        progress: null,
-        summary: null,
-        viewId: 0,
-        viewTotal: 0,
-        viewVersion: get().viewVersion + 1,
-        appliedFilter: "",
-        filterError: null,
-        filterElapsed: null,
-        sort: null,
-        selectedNumber: null,
-        selectedRow: null,
-        history: [],
-        historyPos: -1,
-        detail: null,
-        highlight: null,
-        focusStream: null,
-        scrollRequest: null,
-        scrollReset: get().scrollReset + 1,
-      });
+      set(freshCapture(get, info));
       // A filter typed before opening is applied once indexing completes (see onProgress).
       void setWindowTitle(`${info.fileName} — ${t("app.title")}`);
+      replayEarlyProgress(get, info.captureId);
     } catch (e) {
       set({ openError: errorText(e) });
       get().flash(t("common.error", { message: errorText(e) }));
@@ -201,30 +233,9 @@ export const useStore = create<State>((set, get) => ({
     try {
       const info = await api.startCapture(options);
       get().updateSettings({ lastCapture: options });
-      set({
-        capture: info,
-        liveSaved: false,
-        progress: null,
-        summary: null,
-        viewId: 0,
-        viewTotal: 0,
-        viewVersion: get().viewVersion + 1,
-        appliedFilter: "",
-        filterError: null,
-        filterElapsed: null,
-        sort: null,
-        selectedNumber: null,
-        selectedRow: null,
-        history: [],
-        historyPos: -1,
-        detail: null,
-        highlight: null,
-        focusStream: null,
-        scrollRequest: null,
-        scrollReset: get().scrollReset + 1,
-        dialog: null,
-      });
+      set({ ...freshCapture(get, info), dialog: null });
       void setWindowTitle(`${t("capture.title", { iface: info.fileName })} — ${t("app.title")}`);
+      replayEarlyProgress(get, info.captureId);
       // Keep a typed display filter: it is applied to live data right away.
       if (get().filterText.trim()) void get().applyFilter(get().filterText);
     } catch (e) {
@@ -258,28 +269,23 @@ export const useStore = create<State>((set, get) => ({
     } catch (e) {
       get().flash(t("common.error", { message: errorText(e) }));
     }
+    const dialog = get().dialog;
     set({
-      capture: null,
-      progress: null,
-      summary: null,
-      viewId: 0,
-      viewTotal: 0,
-      viewVersion: get().viewVersion + 1,
-      selectedNumber: null,
-      selectedRow: null,
-      detail: null,
-      highlight: null,
-      focusStream: null,
-      appliedFilter: "",
-      scrollRequest: null,
+      ...freshCapture(get, null),
+      // Properties describe the closed capture.
+      dialog: dialog === "properties" ? null : dialog,
     });
     void setWindowTitle(t("app.title"));
   },
 
   onProgress(p) {
     const s = get();
-    // Ignore late events from a previously opened capture.
-    if (!s.capture || p.captureId !== s.capture.captureId) return;
+    if (!s.capture || p.captureId !== s.capture.captureId) {
+      // Ignore late events from a previously opened capture, but keep early
+      // ones of the capture being opened (see `earlyProgress`).
+      if (p.captureId > lastCaptureId && (!earlyProgress || p.captureId >= earlyProgress.captureId)) earlyProgress = p;
+      return;
+    }
     const wasIndexing = s.progress?.state === "indexing" || s.progress == null;
     set({ progress: p });
     if (s.viewId === 0 && !s.sort) {
@@ -294,8 +300,10 @@ export const useStore = create<State>((set, get) => ({
         .summary()
         .then((summary) => set({ summary }))
         .catch((e) => get().flash(t("common.error", { message: errorText(e) })));
-      // Re-run the active filter/sort over the complete capture.
-      if (s.appliedFilter || s.sort || s.filterText.trim()) void get().applyFilter(s.filterText);
+      // Re-run the active filter/sort over the complete capture (keeping text
+      // the user is still editing), or apply a filter typed before opening.
+      if (s.appliedFilter || s.sort) void get().applyFilter(s.appliedFilter, { refresh: true });
+      else if (s.filterText.trim()) void get().applyFilter(s.filterText);
       else set({ viewVersion: get().viewVersion + 1 });
       if (p.warning) get().flash(t(`status.warning.${p.warning}` as never));
       if (p.error) get().flash(t("status.failed", { error: p.error }));
@@ -332,14 +340,14 @@ export const useStore = create<State>((set, get) => ({
         // A live refresh keeps the user's scroll position.
         ...(refresh ? {} : { scrollRequest: null, scrollReset: get().scrollReset + 1 }),
       });
-      if (refresh) return true;
-      // Keep the selected packet visible if it survived the filter.
+      // Keep the selected packet visible if it survived the filter (a refresh
+      // only updates its row, without scrolling).
       const sel = get().selectedNumber;
       if (sel != null) {
         const row = await api.findRow(v.viewId, sel);
         if (my !== applySeq) return true;
         set({ selectedRow: row });
-        if (row != null) set({ scrollRequest: { row, seq: ++scrollSeq } });
+        if (row != null && !refresh) set({ scrollRequest: { row, seq: ++scrollSeq } });
       }
       return true;
     } catch (e) {
@@ -404,11 +412,10 @@ export const useStore = create<State>((set, get) => ({
     set({ detailLoading: true });
     try {
       const detail = await api.packetDetail(number);
-      if (seq === detailSeq) set({ detail, detailLoading: false, highlight: null, selectedFieldKey: null });
+      if (seq === detailSeq) set({ detail, detailLoading: false, detailError: null, highlight: null, selectedFieldKey: null });
     } catch (e) {
       if (seq === detailSeq) {
-        set({ detail: null, detailLoading: false });
-        get().flash(t("common.error", { message: errorText(e) }));
+        set({ detail: null, detailLoading: false, detailError: errorText(e), highlight: null, selectedFieldKey: null });
       }
     }
   },
@@ -502,10 +509,18 @@ export const useStore = create<State>((set, get) => ({
   },
 
   async setColoringRules(rules) {
-    get().updateSettings({ coloringRules: rules });
-    const errors = await api.setColoringRules(rules.map((r) => (r.enabled ? r.filter : NEVER)));
+    const toFilters = (rs: ColorRule[]) => rs.map((r) => (r.enabled ? r.filter : NEVER));
+    const errors = (await api.setColoringRules(toFilters(rules))).map((e, i) => (rules[i].enabled ? e : null));
+    if (errors.some(Boolean)) {
+      // Keep the saved rules in effect until the edited ones are all valid.
+      await api.setColoringRules(toFilters(get().settings.coloringRules)).catch((e) => {
+        get().flash(t("common.error", { message: errorText(e) }));
+      });
+    } else {
+      get().updateSettings({ coloringRules: rules });
+    }
     set({ viewVersion: get().viewVersion + 1 });
-    return errors.map((e, i) => (rules[i].enabled ? e : null));
+    return errors;
   },
 
   setTimeFormat(f) {

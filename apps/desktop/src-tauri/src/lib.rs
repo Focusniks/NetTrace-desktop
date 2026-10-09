@@ -28,7 +28,6 @@ pub fn run() {
             commands::capture_summary,
             commands::index_progress,
             commands::apply_view,
-            commands::view_len,
             commands::get_rows,
             commands::find_row,
             commands::packet_detail,

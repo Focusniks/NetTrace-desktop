@@ -59,7 +59,6 @@ fn dispatch(engine: &Engine, cmd: &str, a: &Value) -> Result<Value, EngineError>
             let sort: Option<SortSpec> = arg(a, "sort")?;
             ok(engine.apply_view(filter.as_deref(), sort)?)
         }
-        "view_len" => ok(engine.view_len(arg(a, "viewId")?)?),
         "get_rows" => ok(engine.rows(arg(a, "viewId")?, arg(a, "offset")?, arg(a, "limit")?)?),
         "find_row" => ok(engine.find_row(arg(a, "viewId")?, arg(a, "number")?)?),
         "packet_detail" => ok(engine.packet_detail(arg(a, "number")?)?),

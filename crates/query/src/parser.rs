@@ -30,8 +30,10 @@ pub struct Span {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Ast {
-    Or(Box<Ast>, Box<Ast>),
-    And(Box<Ast>, Box<Ast>),
+    /// `a || b || …` (at least two operands, kept flat).
+    Or(Vec<Ast>),
+    /// `a && b && …` (at least two operands, kept flat).
+    And(Vec<Ast>),
     Not(Box<Ast>),
     Field { name: String, span: Span },
     Cmp { field: String, field_span: Span, op: CmpOp, value: Lit, value_span: Span },
@@ -39,12 +41,16 @@ pub enum Ast {
 }
 
 const MAX_DEPTH: usize = 64;
+/// Comparisons per filter (a sanity bound; chains are flat, nesting is
+/// bounded by `MAX_DEPTH`).
+const MAX_TERMS: usize = 4096;
 
 struct Parser<'a> {
     toks: &'a [Token],
     pos: usize,
     len: usize,
     depth: usize,
+    terms: usize,
 }
 
 impl<'a> Parser<'a> {
@@ -82,22 +88,20 @@ impl<'a> Parser<'a> {
 
     fn or(&mut self) -> Result<Ast, QueryError> {
         self.enter()?;
-        let mut left = self.and()?;
+        let mut terms = vec![self.and()?];
         while self.eat(&Tok::Or) {
-            let right = self.and()?;
-            left = Ast::Or(Box::new(left), Box::new(right));
+            terms.push(self.and()?);
         }
         self.depth -= 1;
-        Ok(left)
+        Ok(if terms.len() == 1 { terms.remove(0) } else { Ast::Or(terms) })
     }
 
     fn and(&mut self) -> Result<Ast, QueryError> {
-        let mut left = self.unary()?;
+        let mut terms = vec![self.unary()?];
         while self.eat(&Tok::And) {
-            let right = self.unary()?;
-            left = Ast::And(Box::new(left), Box::new(right));
+            terms.push(self.unary()?);
         }
-        Ok(left)
+        Ok(if terms.len() == 1 { terms.remove(0) } else { Ast::And(terms) })
     }
 
     fn unary(&mut self) -> Result<Ast, QueryError> {
@@ -133,6 +137,10 @@ impl<'a> Parser<'a> {
                 Ok(inner)
             }
             Tok::Word(name) => {
+                self.terms += 1;
+                if self.terms > MAX_TERMS {
+                    return Err(QueryError::new(ErrorCode::TooComplex, tok.start, tok.end, ""));
+                }
                 let field_span = Span { start: tok.start, end: tok.end };
                 let op = match self.peek().map(|t| &t.tok) {
                     Some(Tok::Eq) => CmpOp::Eq,
@@ -184,7 +192,7 @@ pub fn parse(input: &str) -> Result<Ast, QueryError> {
     if toks.is_empty() {
         return Err(QueryError::new(ErrorCode::Empty, 0, 0, ""));
     }
-    let mut p = Parser { toks: &toks, pos: 0, len: input.len(), depth: 0 };
+    let mut p = Parser { toks: &toks, pos: 0, len: input.len(), depth: 0, terms: 0 };
     let ast = p.or()?;
     if let Some(t) = p.peek() {
         return Err(QueryError::new(ErrorCode::UnexpectedToken, t.start, t.end, ""));
@@ -199,22 +207,18 @@ mod tests {
     #[test]
     fn precedence_and_over_or() {
         let ast = parse("a || b && !c").unwrap();
-        match ast {
-            Ast::Or(l, r) => {
-                assert!(matches!(*l, Ast::Field { ref name, .. } if name == "a"));
-                match *r {
-                    Ast::And(_, rr) => assert!(matches!(*rr, Ast::Not(_))),
-                    other => panic!("{other:?}"),
-                }
-            }
-            other => panic!("{other:?}"),
-        }
+        let Ast::Or(or) = ast else { panic!("{ast:?}") };
+        assert!(matches!(&or[0], Ast::Field { name, .. } if name == "a"));
+        let Ast::And(and) = &or[1] else { panic!("{:?}", or[1]) };
+        assert!(matches!(and[1], Ast::Not(_)));
+        assert!(matches!(parse("a || b || c"), Ok(Ast::Or(v)) if v.len() == 3));
     }
 
     #[test]
     fn comparisons_and_sets() {
         let ast = parse("ip.addr == 10.10.1.15 && tcp.port in {80 443}").unwrap();
-        let Ast::And(l, r) = ast else { panic!() };
+        let Ast::And(and) = ast else { panic!() };
+        let (l, r) = (&and[0], &and[1]);
         assert!(matches!(*l, Ast::Cmp { op: CmpOp::Eq, value: Lit::Word(ref v), .. } if v == "10.10.1.15"));
         assert!(matches!(*r, Ast::In { ref values, .. } if values.len() == 2));
         assert!(parse(r#"http.host contains "example""#).is_ok());

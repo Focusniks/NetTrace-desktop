@@ -41,8 +41,8 @@ enum Value {
 
 #[derive(Debug, Clone, PartialEq)]
 enum Expr {
-    Or(Box<Expr>, Box<Expr>),
-    And(Box<Expr>, Box<Expr>),
+    Or(Vec<Expr>),
+    And(Vec<Expr>),
     Not(Box<Expr>),
     Exists(Vec<u32>),
     Cmp { ids: Vec<u32>, op: CmpOp, value: Value },
@@ -89,8 +89,8 @@ fn resolve(name: &str, span: Span, registry: &dyn FieldRegistry, fields: &mut Ve
 
 fn compile(ast: &Ast, registry: &dyn FieldRegistry, fields: &mut Vec<u32>) -> Result<Expr, QueryError> {
     Ok(match ast {
-        Ast::Or(a, b) => Expr::Or(Box::new(compile(a, registry, fields)?), Box::new(compile(b, registry, fields)?)),
-        Ast::And(a, b) => Expr::And(Box::new(compile(a, registry, fields)?), Box::new(compile(b, registry, fields)?)),
+        Ast::Or(terms) => Expr::Or(terms.iter().map(|a| compile(a, registry, fields)).collect::<Result<_, _>>()?),
+        Ast::And(terms) => Expr::And(terms.iter().map(|a| compile(a, registry, fields)).collect::<Result<_, _>>()?),
         Ast::Not(a) => Expr::Not(Box::new(compile(a, registry, fields)?)),
         Ast::Field { name, span } => Expr::Exists(resolve(name, *span, registry, fields)?.ids),
         Ast::Cmp { field, field_span, op, value, value_span } => {
@@ -204,8 +204,8 @@ fn literal(kind: FieldKind, op: CmpOp, lit: &Lit, span: Span) -> Result<Value, Q
 
 fn eval(e: &Expr, src: &mut dyn FieldSource, buf: &mut Vec<FieldValue>) -> bool {
     match e {
-        Expr::Or(a, b) => eval(a, src, buf) || eval(b, src, buf),
-        Expr::And(a, b) => eval(a, src, buf) && eval(b, src, buf),
+        Expr::Or(terms) => terms.iter().any(|a| eval(a, src, buf)),
+        Expr::And(terms) => terms.iter().all(|a| eval(a, src, buf)),
         Expr::Not(a) => !eval(a, src, buf),
         Expr::Exists(ids) => {
             buf.clear();

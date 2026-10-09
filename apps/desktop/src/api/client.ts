@@ -3,6 +3,7 @@
 // the same engine through a localhost bridge proxied by Vite. There is no
 // mock backend.
 
+import { t } from "../i18n";
 import type {
   CaptureInfo,
   CaptureInterface,
@@ -84,7 +85,6 @@ export const api = {
   summary: () => call<CaptureSummary>("capture_summary"),
   progress: () => call<IndexProgress>("index_progress"),
   applyView: (filter: string | null, sort: SortSpec | null) => call<ViewInfo>("apply_view", { filter, sort }),
-  viewLen: (viewId: number) => call<number>("view_len", { viewId }),
   rows: (viewId: number, offset: number, limit: number) => call<PacketRow[]>("get_rows", { viewId, offset, limit }),
   findRow: (viewId: number, number: number) => call<number | null>("find_row", { viewId, number }),
   packetDetail: (number: number) => call<PacketDetail>("packet_detail", { number }),
@@ -141,28 +141,13 @@ export async function pickCaptureFile(title: string): Promise<string | null> {
       multiple: false,
       directory: false,
       filters: [
-        { name: "Packet capture", extensions: ["pcap", "pcapng", "cap"] },
-        { name: "*", extensions: ["*"] },
+        { name: t("file.captures"), extensions: ["pcap", "pcapng", "cap"] },
+        { name: t("file.all"), extensions: ["*"] },
       ],
     });
     return typeof r === "string" ? r : null;
   }
   return window.prompt(title);
-}
-
-export async function pickSavePath(title: string, defaultName: string): Promise<string | null> {
-  if (inTauri) {
-    const { save } = await import("@tauri-apps/plugin-dialog");
-    return save({
-      title,
-      defaultPath: defaultName,
-      filters: [
-        { name: "PCAP", extensions: ["pcap"] },
-        { name: "PCAPNG", extensions: ["pcapng"] },
-      ],
-    });
-  }
-  return window.prompt(title, defaultName);
 }
 
 export async function setWindowTitle(title: string): Promise<void> {

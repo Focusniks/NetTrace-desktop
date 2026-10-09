@@ -92,13 +92,33 @@ pub fn create_file(path: &Path, source: &dyn LiveSource) -> io::Result<PcapWrite
     Ok(w)
 }
 
+/// Sets `done` when the recorder ends in any way, panics included: the
+/// indexer's `TailReader` waits for it.
+struct DoneOnDrop<'a>(&'a LiveHandle);
+
+impl Drop for DoneOnDrop<'_> {
+    fn drop(&mut self) {
+        self.0.stats.lock().running = false;
+        self.0.done.store(true, Ordering::SeqCst);
+    }
+}
+
+fn panic_text(payload: &(dyn std::any::Any + Send)) -> String {
+    let what = payload.downcast_ref::<&str>().copied().or_else(|| payload.downcast_ref::<String>().map(String::as_str));
+    format!("internal: the capture thread stopped unexpectedly ({})", what.unwrap_or("panic"))
+}
+
 /// Recorder thread body: copies packets until stopped or the source fails.
 pub fn record(mut source: Box<dyn LiveSource>, mut out: PcapWriter<BufWriter<File>>, handle: &LiveHandle) {
+    // Declared first, so it is dropped last (after the driver handle is closed).
+    let _done = DoneOnDrop(handle);
     let mut buf = Vec::with_capacity(2048);
     let mut last_flush = Instant::now();
     let mut last_stats = Instant::now();
     let mut dirty = false;
-    let result: Result<(), String> = (|| {
+    // A panic (e.g. inside the capture driver) must still end the session:
+    // the indexer waits for `done`.
+    let result: Result<(), String> = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         while !handle.stop.load(Ordering::SeqCst) {
             match source.next_packet(&mut buf, POLL).map_err(|e| e.to_string())? {
                 Some(p) => {
@@ -126,7 +146,8 @@ pub fn record(mut source: Box<dyn LiveSource>, mut out: PcapWriter<BufWriter<Fil
             }
         }
         Ok(())
-    })();
+    }))
+    .unwrap_or_else(|p| Err(panic_text(p.as_ref())));
     update_driver_stats(source.as_mut(), handle);
     if let Err(e) = out.flush() {
         handle.error.lock().get_or_insert(format!("write: {e}"));
@@ -134,11 +155,9 @@ pub fn record(mut source: Box<dyn LiveSource>, mut out: PcapWriter<BufWriter<Fil
     if let Err(e) = result {
         *handle.error.lock() = Some(e);
     }
-    handle.stats.lock().running = false;
-    // Close the driver handle before announcing completion.
+    // Close the driver handle before announcing completion (`_done`).
     drop(source);
     drop(out);
-    handle.done.store(true, Ordering::SeqCst);
 }
 
 fn update_driver_stats(source: &mut dyn LiveSource, handle: &LiveHandle) {

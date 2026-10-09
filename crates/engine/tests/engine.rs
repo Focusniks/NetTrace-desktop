@@ -175,6 +175,11 @@ fn streams_and_sequence() {
         .unwrap();
     assert_eq!(found.total, 1);
 
+    // "All" ranks TCP and UDP flows together by the chosen key.
+    let all = e.flows(&FlowQuery { kind: None, sort: FlowSort::Bytes, desc: true, offset: 0, limit: 100, search: None }).unwrap();
+    assert!(all.flows.windows(2).all(|w| w[0].bytes >= w[1].bytes));
+    assert!(all.flows.iter().any(|f| f.kind == Transport::Udp) && all.flows.iter().any(|f| f.kind == Transport::Tcp));
+
     let seq = e.sequence(StreamRef { kind: Transport::Tcp, id: 0 }, 0, 100).unwrap();
     assert_eq!(seq.total as usize, seq.entries.len());
     assert_eq!(seq.entries[0].label, "SYN");
@@ -484,4 +489,29 @@ fn stopping_a_quiet_capture_finishes_indexing() {
     let f = fixture("b.pcap", scenarios::tcp_basic().to_pcap());
     let e2 = open(&f.path);
     assert_eq!(e2.stop_capture().unwrap_err().code, "not_live");
+}
+
+#[test]
+fn a_crashing_capture_driver_ends_the_session() {
+    use nettrace_live::{DriverStats, LiveError, LivePacket, LiveSource};
+    use nettrace_packet::LinkType;
+
+    struct Crashing;
+    impl LiveSource for Crashing {
+        fn link_type(&self) -> LinkType {
+            LinkType::Ethernet
+        }
+        fn next_packet(&mut self, _: &mut Vec<u8>, _: Duration) -> Result<Option<LivePacket>, LiveError> {
+            panic!("driver crashed");
+        }
+        fn stats(&mut self) -> Option<DriverStats> {
+            None
+        }
+    }
+
+    let e = Engine::new();
+    e.start_capture_with(Box::new(Crashing), "crash0", Arc::new(|_| {})).unwrap();
+    let p = e.session().unwrap().wait_indexed(Duration::from_secs(10));
+    assert_ne!(p.state, IndexState::Indexing, "indexing must not wait forever for a dead recorder");
+    assert!(!e.session().unwrap().capturing());
 }

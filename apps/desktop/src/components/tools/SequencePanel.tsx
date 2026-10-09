@@ -78,6 +78,40 @@ function Sequence({ stream }: { stream: StreamRef }) {
       .catch(fail);
   }, [stream, indexState]);
 
+  // A live capture keeps adding packets to the stream: refresh periodically.
+  // Page 0 carries the new total; partly filled pages are refetched and
+  // replaced in place (never removed first), so visible rows do not blink.
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    if (indexState !== "indexing") return;
+    const id = setInterval(() => setTick((n) => n + 1), 2000);
+    return () => clearInterval(id);
+  }, [indexState]);
+  useEffect(() => {
+    if (tick === 0) return;
+    const my = gen.current;
+    const fail = (e: Error) => {
+      if (my === gen.current) setError(e.message);
+    };
+    api
+      .flow(stream)
+      .then((f) => my === gen.current && setFlow(f))
+      .catch(fail);
+    const stale = new Set([0, ...[...pages].filter(([, v]) => v.length < PAGE).map(([k]) => k)]);
+    for (const k of stale) {
+      api
+        .sequence(stream, k * PAGE, PAGE)
+        .then((p) => {
+          if (my !== gen.current) return;
+          setError(null);
+          setTotal(p.total);
+          setPages((prev) => new Map(prev).set(k, p.entries));
+        })
+        .catch(fail);
+    }
+    // Only the timer drives this effect.
+  }, [tick]);
+
   useEffect(() => {
     const el = bodyRef.current;
     if (!el) return;

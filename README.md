@@ -129,6 +129,7 @@ MIT или Apache 2.0 на ваш выбор: [LICENSE-MIT](LICENSE-MIT), [LICEN
 crates/model     DTO-контракт backend ↔ UI
 crates/packet    курсор с проверкой границ, адреса, link types, время
 crates/capture   чтение PCAP/PCAPNG, запись PCAP/PCAPNG, PacketSource
+crates/live      живой захват через Npcap/libpcap (загрузка в рантайме)
 crates/protocol  диссекторы, реестр диссекторов и полей фильтра
 crates/flow      TCP/UDP-потоки и TCP-анализ
 crates/analysis  узлы, соединения, иерархия, I/O, шкала, индикаторы

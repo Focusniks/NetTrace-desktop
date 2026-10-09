@@ -241,6 +241,7 @@ fn run(reg: &Registry, frame: &[u8], fctx: &FrameContext, opts: DissectOptions) 
     };
     for _ in 0..MAX_LAYERS {
         let depth = ctx.tree.depth();
+        let app = matches!(step, Step::App(..));
         let result = match step {
             Step::Done => break,
             Step::Layer(d, layer) => {
@@ -259,6 +260,12 @@ fn run(reg: &Registry, frame: &[u8], fctx: &FrameContext, opts: DissectOptions) 
         ctx.tree.close_to(depth);
         step = match result {
             Ok(h) => resolve(reg, frame, h),
+            // Running out of bytes is expected when the payload is knowingly cut;
+            // invalid values are still malformed.
+            Err(mal) if app && ctx.incomplete && mal.truncated => {
+                unreassembled(&mut ctx, mal);
+                Step::Done
+            }
             Err(mal) => {
                 malformed(&mut ctx, mal);
                 Step::Done
@@ -329,6 +336,22 @@ fn malformed(ctx: &mut Ctx, mal: Malformed) {
             format!("{} [Malformed Packet]", ctx.info.as_str())
         };
         ctx.info.set(ProtocolId::Malformed, || text);
+    }
+}
+
+/// An application message cut short by the capture itself (snaplen, IP
+/// fragmentation without reassembly): a note, not a malformed packet.
+fn unreassembled(ctx: &mut Ctx, mal: Malformed) {
+    let name = mal.protocol.short_name();
+    ctx.tree.expert(&fields::EXPERT, Severity::Warning, || {
+        format!("[{name} message is incomplete in this packet (offset {}): not reassembled]", mal.offset)
+    });
+    if ctx.info.enabled() {
+        let text = match ctx.info.as_str() {
+            "" => format!("[Unreassembled {name}]"),
+            info => format!("{info} [Unreassembled]"),
+        };
+        ctx.info.set(mal.protocol, || text);
     }
 }
 

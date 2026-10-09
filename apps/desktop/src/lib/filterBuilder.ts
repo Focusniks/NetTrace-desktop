@@ -74,6 +74,12 @@ export function conditionToFilter(c: BuilderCondition): string | null {
   const needsValue = c.op !== "present" && c.op !== "absent";
   if (needsValue && !v) return null;
   const cmp = (field: string, value: string) => `${field} ${op} ${value}`;
+  // A port of either transport. "!=" must negate the whole match: `udp.srcport != X`
+  // alone is true for every TCP packet (it has no udp.srcport at all).
+  const anyTransport = (suffix: string) =>
+    c.op === "ne"
+      ? `!(tcp.${suffix} == ${v} || udp.${suffix} == ${v})`
+      : `(${cmp(`tcp.${suffix}`, v)} || ${cmp(`udp.${suffix}`, v)})`;
   switch (c.field) {
     case "src":
       return cmp(isIpv6(v) ? "ipv6.src" : "ip.src", v);
@@ -82,13 +88,11 @@ export function conditionToFilter(c: BuilderCondition): string | null {
     case "ip":
       return cmp(isIpv6(v) ? "ipv6.addr" : "ip.addr", v);
     case "port":
-      return c.op === "ne"
-        ? `!(tcp.port == ${v} || udp.port == ${v})`
-        : `(${cmp("tcp.port", v)} || ${cmp("udp.port", v)})`;
+      return anyTransport("port");
     case "srcport":
-      return `(${cmp("tcp.srcport", v)} || ${cmp("udp.srcport", v)})`;
+      return anyTransport("srcport");
     case "dstport":
-      return `(${cmp("tcp.dstport", v)} || ${cmp("udp.dstport", v)})`;
+      return anyTransport("dstport");
     case "stream":
       return cmp("tcp.stream", v);
     case "frame":

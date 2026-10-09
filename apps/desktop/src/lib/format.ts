@@ -23,13 +23,10 @@ export function fmtRate(bytesPerSec: number): string {
   return `${fmtBytes(bytesPerSec)}/${t("unit.s")}`;
 }
 
-/** Seconds with fixed fractional digits, e.g. `12.345678`. */
-export function fmtSeconds(s: number, digits = 6): string {
-  return s.toFixed(digits);
-}
-
 export function fmtDuration(s: number): string {
-  if (s < 1) return `${(s * 1000).toFixed(3)} ${t("unit.ms")}`;
+  // Few digits below 10 ms: "2.000 мс" would read as two thousand in Russian.
+  if (s < 0.01) return `${(s * 1000).toLocaleString(locale, { maximumFractionDigits: 2 })} ${t("unit.ms")}`;
+  if (s < 1) return `${(s * 1000).toLocaleString(locale, { maximumFractionDigits: 1 })} ${t("unit.ms")}`;
   if (s < 120) return `${s.toFixed(3)} ${t("unit.s")}`;
   const m = Math.floor(s / 60);
   const rest = s - m * 60;

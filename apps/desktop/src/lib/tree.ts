@@ -60,7 +60,10 @@ export function ancestorKeys(tree: PacketField[], path: string): string[] {
   return keys;
 }
 
-/** Deepest node whose byte range covers `offset` (protocol tree ↔ hex link). */
+/**
+ * Smallest node whose byte range covers `offset` (protocol tree ↔ hex link).
+ * On a tie the first one in tree order wins, i.e. a field over its bit fields.
+ */
 export function deepestAt(tree: PacketField[], offset: number): string | null {
   let best: string | null = null;
   let bestLen = Infinity;
@@ -68,7 +71,7 @@ export function deepestAt(tree: PacketField[], offset: number): string | null {
     nodes.forEach((n, i) => {
       const path = parent === null ? String(i) : `${parent}/${i}`;
       if (n.len > 0 && offset >= n.start && offset < n.start + n.len) {
-        if (n.len <= bestLen) {
+        if (n.len < bestLen) {
           best = path;
           bestLen = n.len;
         }
@@ -80,7 +83,7 @@ export function deepestAt(tree: PacketField[], offset: number): string | null {
   tree.forEach((n, i) => {
     if (n.field !== "frame") {
       const path = String(i);
-      if (n.len > 0 && offset >= n.start && offset < n.start + n.len && n.len <= bestLen) {
+      if (n.len > 0 && offset >= n.start && offset < n.start + n.len && n.len < bestLen) {
         best = path;
         bestLen = n.len;
       }

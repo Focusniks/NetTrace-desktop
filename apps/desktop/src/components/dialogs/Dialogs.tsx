@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import { t } from "../../i18n";
 import { DEFAULT_RULES, type ColorRule } from "../../lib/coloring";
 import { fmtAbsolute, fmtBytes, fmtDuration, fmtInt, fmtRate } from "../../lib/format";
-import { useStore } from "../../state/store";
+import { errorText, useStore } from "../../state/store";
 import { APP_VERSION } from "../../version";
 import { CaptureDialog, UnsavedDialog } from "../capture/CaptureDialog";
 import { Dialog } from "../common/Dialog";
@@ -103,17 +103,24 @@ function ColoringDialog({ onClose }: { onClose: () => void }) {
       [next[i], next[j]] = [next[j], next[i]];
       return next;
     });
+  const [saveError, setSaveError] = useState<string | null>(null);
   const save = async () => {
-    const errs = await useStore.getState().setColoringRules(rules);
-    const texts = errs.map((e) => (e ? filterErrorText(e) : null));
-    setErrors(texts);
-    if (texts.every((e) => !e)) onClose();
+    setSaveError(null);
+    try {
+      const errs = await useStore.getState().setColoringRules(rules);
+      const texts = errs.map((e) => (e ? filterErrorText(e) : null));
+      setErrors(texts);
+      if (texts.every((e) => !e)) onClose();
+    } catch (e) {
+      setSaveError(errorText(e));
+    }
   };
   return (
     <Dialog
       title={t("dialog.coloring.title")}
       onClose={onClose}
       width={880}
+      dismissOnBackdrop={false}
       footer={
         <>
           <button className="btn" onClick={() => setRules(DEFAULT_RULES)}>
@@ -162,8 +169,8 @@ function ColoringDialog({ onClose }: { onClose: () => void }) {
               </td>
               <td style={{ width: 170 }}>
                 <span className="row">
-                  <input type="color" className="swatch" value={r.bg} onChange={(e) => update(i, { bg: e.target.value })} aria-label="bg" />
-                  <input type="color" className="swatch" value={r.fg} onChange={(e) => update(i, { fg: e.target.value })} aria-label="fg" />
+                  <input type="color" className="swatch" value={r.bg} onChange={(e) => update(i, { bg: e.target.value })} aria-label={t("dialog.coloring.bg")} />
+                  <input type="color" className="swatch" value={r.fg} onChange={(e) => update(i, { fg: e.target.value })} aria-label={t("dialog.coloring.fg")} />
                   <span className="rule-preview" style={{ background: r.bg, color: r.fg }}>
                     10.0.0.1
                   </span>
@@ -187,11 +194,16 @@ function ColoringDialog({ onClose }: { onClose: () => void }) {
       <button
         className="btn btn-small"
         style={{ marginTop: 8 }}
-        onClick={() => setRules((rs) => [...rs, { name: "Правило", filter: "", bg: "#2a3140", fg: "#d5dae2", enabled: true }])}
+        onClick={() => setRules((rs) => [...rs, { name: t("dialog.coloring.newRule"), filter: "", bg: "#2a3140", fg: "#d5dae2", enabled: true }])}
       >
         <Icon name="plus" />
         {t("dialog.coloring.add")}
       </button>
+      {saveError ? (
+        <div role="alert" className="tool-error" style={{ marginTop: 8 }}>
+          {t("common.error", { message: saveError })}
+        </div>
+      ) : null}
     </Dialog>
   );
 }
@@ -243,9 +255,14 @@ function PropertiesDialog({ onClose }: { onClose: () => void }) {
 const SHORTCUTS: [string, Parameters<typeof t>[0]][] = [
   ["Ctrl+O", "sc.open"],
   ["Ctrl+S", "sc.save"],
+  ["Ctrl+W", "sc.close"],
   ["Ctrl+F", "sc.find"],
   ["Ctrl+G", "sc.goto"],
   ["Ctrl+/", "sc.filter"],
+  ["Ctrl+K", "sc.interfaces"],
+  ["Ctrl+E", "sc.capture"],
+  ["Ctrl+R", "sc.restart"],
+  ["Ctrl+T", "sc.timeline"],
   ["↑ / ↓", "sc.nav"],
   ["PgUp / PgDn", "sc.page"],
   ["Home / End", "sc.firstLast"],

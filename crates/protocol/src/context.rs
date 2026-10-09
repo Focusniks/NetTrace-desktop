@@ -194,6 +194,9 @@ pub struct Ctx<'f> {
     pub summary: Summary,
     pub tree: Tree,
     pub info: Info,
+    /// The payload is knowingly incomplete (snaplen cut, first IP fragment):
+    /// an application layer running out of bytes is not malformed.
+    pub incomplete: bool,
 }
 
 impl<'f> Ctx<'f> {
@@ -204,6 +207,7 @@ impl<'f> Ctx<'f> {
             summary: Summary::default(),
             tree: Tree::new(opts.tree),
             info: Info { enabled: opts.info, ..Info::default() },
+            incomplete: frame.caplen < frame.origlen,
         }
     }
 
@@ -232,15 +236,17 @@ impl<'f> Ctx<'f> {
 pub struct Malformed {
     pub protocol: ProtocolId,
     pub offset: usize,
+    /// The layer ran out of bytes (as opposed to holding invalid values).
+    pub truncated: bool,
 }
 
 impl Malformed {
     pub fn at(protocol: ProtocolId, offset: usize) -> Self {
-        Malformed { protocol, offset }
+        Malformed { protocol, offset, truncated: false }
     }
 }
 
 /// Lets dissectors use `?` on cursor reads: `c.be_u16().map_err(m(ProtocolId::Tcp))?`.
 pub fn m(protocol: ProtocolId) -> impl Fn(Truncated) -> Malformed {
-    move |t| Malformed { protocol, offset: t.offset }
+    move |t| Malformed { protocol, offset: t.offset, truncated: true }
 }

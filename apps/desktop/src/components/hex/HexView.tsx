@@ -99,7 +99,7 @@ export function HexView() {
       { label: t("ctx.copyHex"), onSelect: () => void copy(range.map((b) => HEX[b]).join(" ")) },
       { label: "ASCII", onSelect: () => void copy(range.map(printable).join("")) },
       {
-        label: "Hex dump",
+        label: t("hex.dump"),
         onSelect: () => {
           const out: string[] = [];
           for (let i = 0; i < bytes.length; i += PER_LINE) {

@@ -208,7 +208,7 @@ export function TimelinePanel() {
           rows={events}
           rowKey={(e) => `${e.number}:${e.kind}`}
           selectedKey={events.find((e) => e.number === selectedNumber) ? `${selectedNumber}:${events.find((e) => e.number === selectedNumber)?.kind}` : null}
-          onSelect={(e) => void useStore.getState().selectPacket(e.number)}
+          onSelect={(e) => void useStore.getState().selectPacket(e.number, { reveal: false })}
           onActivate={(e) => e.stream && useStore.getState().focusOnStream(e.stream, "streams")}
         />
       </div>

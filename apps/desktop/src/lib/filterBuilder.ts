@@ -9,6 +9,7 @@ export type BuilderField =
   | "dstport"
   | "protocol"
   | "stream"
+  | "udpstream"
   | "frame"
   | "mac"
   | "dns"
@@ -28,7 +29,7 @@ export interface BuilderCondition {
 }
 
 export const BUILDER_FIELDS: BuilderField[] = [
-  "src", "dst", "ip", "protocol", "port", "srcport", "dstport", "stream", "frame", "mac", "dns", "host", "sni", "len", "flags",
+  "src", "dst", "ip", "protocol", "port", "srcport", "dstport", "stream", "udpstream", "frame", "mac", "dns", "host", "sni", "len", "flags",
 ];
 
 export const PROTOCOLS = ["tcp", "udp", "icmp", "icmpv6", "arp", "dns", "dhcp", "http", "tls", "ntp", "ip", "ipv6", "vlan", "eth"];
@@ -51,6 +52,7 @@ export function opsFor(field: BuilderField): BuilderOp[] {
     case "frame":
     case "len":
     case "stream":
+    case "udpstream":
       return ["eq", "ne", "gt", "lt"];
     default:
       return ["eq", "ne"];
@@ -66,6 +68,24 @@ function quote(v: string): string {
 }
 
 const OP: Record<BuilderOp, string> = { eq: "==", ne: "!=", contains: "contains", gt: ">", lt: "<", present: "", absent: "" };
+
+/** Fields whose values are interchangeable (an IP stays an IP, a port a port). */
+const VALUE_KINDS: BuilderField[][] = [
+  ["src", "dst", "ip"],
+  ["port", "srcport", "dstport"],
+  ["dns", "host", "sni"],
+  ["stream", "udpstream"],
+];
+
+/** The condition with another field: the value is kept only if it still makes sense. */
+export function withField(c: BuilderCondition, field: BuilderField): BuilderCondition {
+  const sameKind = VALUE_KINDS.some((k) => k.includes(c.field) && k.includes(field));
+  const next: BuilderCondition = { ...c, field, value: sameKind ? c.value : "" };
+  if (field === "protocol") next.value = "tcp";
+  if (field === "flags") next.value = "syn";
+  if (!opsFor(field).includes(next.op)) next.op = opsFor(field)[0];
+  return next;
+}
 
 /** One condition → filter fragment, or null when incomplete. */
 export function conditionToFilter(c: BuilderCondition): string | null {
@@ -93,8 +113,11 @@ export function conditionToFilter(c: BuilderCondition): string | null {
       return anyTransport("srcport");
     case "dstport":
       return anyTransport("dstport");
+    // Stream numbers are counted per transport: TCP 3 and UDP 3 are unrelated.
     case "stream":
       return cmp("tcp.stream", v);
+    case "udpstream":
+      return cmp("udp.stream", v);
     case "frame":
       return cmp("frame.number", v);
     case "len":

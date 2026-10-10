@@ -6,9 +6,9 @@
 //! analysis features therefore work on live traffic unchanged, and the
 //! capture can be saved like any opened file.
 
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::{self, BufWriter, Read};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -84,9 +84,27 @@ impl Read for TailReader {
     }
 }
 
-/// Creates the capture file with its header written, ready for the recorder.
-pub fn create_file(path: &Path, source: &dyn LiveSource) -> io::Result<PcapWriter<BufWriter<File>>> {
-    let file = File::create(path)?;
+/// Creates a new, empty temporary capture file with an unpredictable name.
+/// Never opens an existing file, so a file (or link) planted in the temp
+/// directory cannot be written through.
+pub fn create_temp_file() -> io::Result<(File, PathBuf)> {
+    std::fs::create_dir_all(temp_dir())?;
+    for _ in 0..8 {
+        let mut id = [0u8; 16];
+        getrandom::fill(&mut id).map_err(|e| io::Error::other(e.to_string()))?;
+        let name: String = id.iter().map(|b| format!("{b:02x}")).collect();
+        let path = temp_dir().join(format!("live-{name}.pcap"));
+        match OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(file) => return Ok((file, path)),
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    Err(io::Error::new(io::ErrorKind::AlreadyExists, "no free temporary file name"))
+}
+
+/// Writes the capture header to the new file, ready for the recorder.
+pub fn create_file(file: File, source: &dyn LiveSource) -> io::Result<PcapWriter<BufWriter<File>>> {
     let mut w = PcapWriter::new(BufWriter::with_capacity(256 * 1024, file), source.link_type(), false)?;
     w.flush()?;
     Ok(w)
@@ -103,9 +121,10 @@ impl Drop for DoneOnDrop<'_> {
     }
 }
 
-fn panic_text(payload: &(dyn std::any::Any + Send)) -> String {
+/// Error text of a background thread that panicked (keeps the panic message for reports).
+pub(crate) fn panic_text(thread: &str, payload: &(dyn std::any::Any + Send)) -> String {
     let what = payload.downcast_ref::<&str>().copied().or_else(|| payload.downcast_ref::<String>().map(String::as_str));
-    format!("internal: the capture thread stopped unexpectedly ({})", what.unwrap_or("panic"))
+    format!("internal: the {thread} thread stopped unexpectedly ({})", what.unwrap_or("panic"))
 }
 
 /// Recorder thread body: copies packets until stopped or the source fails.
@@ -147,7 +166,7 @@ pub fn record(mut source: Box<dyn LiveSource>, mut out: PcapWriter<BufWriter<Fil
         }
         Ok(())
     }))
-    .unwrap_or_else(|p| Err(panic_text(p.as_ref())));
+    .unwrap_or_else(|p| Err(panic_text("capture", p.as_ref())));
     update_driver_stats(source.as_mut(), handle);
     if let Err(e) = out.flush() {
         handle.error.lock().get_or_insert(format!("write: {e}"));
@@ -173,13 +192,6 @@ pub fn temp_dir() -> PathBuf {
     std::env::temp_dir().join("NetTrace")
 }
 
-/// Unique path for a new live capture (unique across engines of this process).
-pub fn new_temp_path() -> PathBuf {
-    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let n = SEQ.fetch_add(1, Ordering::SeqCst);
-    temp_dir().join(format!("live-{}-{n}.pcap", std::process::id()))
-}
-
 /// Removes leftovers of crashed earlier runs: live files untouched for a day.
 /// (Recent files may belong to another running instance.)
 pub fn clean_stale_files() {
@@ -202,5 +214,22 @@ pub struct TempFile(pub PathBuf);
 impl Drop for TempFile {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn temporary_files_are_new_and_unpredictable() {
+        let (_a, pa) = create_temp_file().unwrap();
+        let (_b, pb) = create_temp_file().unwrap();
+        let _cleanup = (TempFile(pa.clone()), TempFile(pb.clone()));
+        assert_ne!(pa, pb);
+        let name = pa.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(name.starts_with("live-") && name.ends_with(".pcap") && name.len() == "live-.pcap".len() + 32, "{name}");
+        // The name is never reused for an existing file.
+        assert!(OpenOptions::new().write(true).create_new(true).open(&pa).is_err());
     }
 }

@@ -108,7 +108,8 @@ pub fn registry() -> &'static Registry {
     })
 }
 
-fn id_of(field: &'static fields::Field) -> Option<u32> {
+/// Filter field id of a protocol tree field (index in `fields::ALL`).
+pub(crate) fn id_of(field: &'static fields::Field) -> Option<u32> {
     fields::ALL.iter().position(|f| std::ptr::eq(*f, field)).map(|i| i as u32)
 }
 

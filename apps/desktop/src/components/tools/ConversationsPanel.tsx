@@ -14,7 +14,7 @@ import { useDebounced, usePagedTable } from "./usePagedTable";
 
 const KINDS: ConversationKind[] = ["eth", "ip", "tcp", "udp"];
 /** Columns the backend can sort by (column id = sort key). */
-const SORTS: ConversationSort[] = ["a", "b", "packets", "bytes", "ab", "ba", "start", "duration", "state"];
+const SORTS: ConversationSort[] = ["a", "b", "packets", "bytes", "ab", "ba", "start", "end", "duration", "state"];
 
 function columns(kind: ConversationKind): VColumn<ConversationRow>[] {
   const ports = kind === "tcp" || kind === "udp";
@@ -26,6 +26,7 @@ function columns(kind: ConversationKind): VColumn<ConversationRow>[] {
     { id: "ab", sortable: true, title: t("conv.col.ab"), width: 84, align: "right", render: (c) => fmtBytes(c.aToBBytes) },
     { id: "ba", sortable: true, title: t("conv.col.ba"), width: 84, align: "right", render: (c) => fmtBytes(c.bToABytes) },
     { id: "start", sortable: true, title: t("conv.col.start"), width: 80, align: "right", mono: true, render: (c) => c.start.toFixed(3) },
+    { id: "end", sortable: true, title: t("conv.col.end"), width: 80, align: "right", mono: true, render: (c) => c.end.toFixed(3) },
     { id: "duration", sortable: true, title: t("conv.col.duration"), width: 90, align: "right", render: (c) => fmtDuration(c.duration) },
   ];
   if (kind === "tcp") {

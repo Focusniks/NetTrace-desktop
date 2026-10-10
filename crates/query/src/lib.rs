@@ -147,6 +147,21 @@ mod tests {
     }
 
     #[test]
+    fn witnesses_are_the_positive_matches() {
+        let w = |f: &str, id: u32, v: FieldValue| Filter::compile(f, &Reg).unwrap().witness(id, &v);
+        // ip.addr is an alias of ip.src (3) and ip.dst (4).
+        assert!(w("ip.addr == 10.10.4.21", 4, FieldValue::Ipv4([10, 10, 4, 21])));
+        assert!(!w("ip.addr == 10.10.4.21", 4, FieldValue::Ipv4([10, 10, 1, 15])));
+        assert!(w("tcp", 1, FieldValue::None));
+        assert!(w("tcp.port in {80 443}", 6, FieldValue::U64(443)));
+        assert!(w(r#"http.host contains "example""#, 7, FieldValue::Str("api.example.com".into())));
+        assert!(w("udp || tcp.port == 443", 6, FieldValue::U64(443)));
+        // Nothing under a negation, and `!=` never points at a field.
+        assert!(!w("!(tcp.port == 443)", 6, FieldValue::U64(443)));
+        assert!(!w("tcp.port != 80", 6, FieldValue::U64(443)));
+    }
+
+    #[test]
     fn compile_errors() {
         let code = |f: &str| Filter::compile(f, &Reg).unwrap_err().code;
         assert_eq!(code("foo.bar"), ErrorCode::UnknownField);

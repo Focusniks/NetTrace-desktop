@@ -1,9 +1,11 @@
 import { useMemo, useState } from "react";
 
+import { inTauri } from "../../api/client";
 import { t } from "../../i18n";
 import { DEFAULT_RULES, type ColorRule } from "../../lib/coloring";
 import { fmtAbsolute, fmtBytes, fmtDuration, fmtInt, fmtRate } from "../../lib/format";
 import { errorText, useStore } from "../../state/store";
+import { checkForUpdates } from "../../state/updater";
 import { APP_VERSION } from "../../version";
 import { CaptureDialog, UnsavedDialog } from "../capture/CaptureDialog";
 import { Dialog } from "../common/Dialog";
@@ -31,6 +33,7 @@ export function Dialogs() {
           </p>
           <p className="muted">{t("dialog.about.text")}</p>
           <p className="muted">{t("dialog.about.network")}</p>
+          {inTauri ? <LastUpdateCheck /> : null}
           <p className="faint" style={{ marginBottom: 0 }}>
             {t("dialog.about.license")} github.com/Focusniks/NetTrace-desktop
           </p>
@@ -49,6 +52,25 @@ export function Dialogs() {
     default:
       return null;
   }
+}
+
+/** Outcome of the last update check: a failed startup check is otherwise silent. */
+function LastUpdateCheck() {
+  const last = useStore((s) => s.settings.lastUpdateCheck);
+  const result = !last
+    ? t("update.lastCheckNever")
+    : t("update.lastCheck", {
+        date: new Date(last.at).toLocaleString(),
+        result: last.ok ? t("update.lastCheckOk") : t("update.lastCheckFailed", { message: last.error ?? "" }),
+      });
+  return (
+    <p className={last && !last.ok ? "tool-error" : "muted"}>
+      {result}{" "}
+      <button className="link" onClick={() => void checkForUpdates(true)}>
+        {t("update.checkNow")}
+      </button>
+    </p>
+  );
 }
 
 function GotoDialog({ onClose }: { onClose: () => void }) {

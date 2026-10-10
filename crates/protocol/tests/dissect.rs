@@ -446,3 +446,22 @@ fn windows_loopback_ipv6() {
         assert_eq!(d.summary.top, Some(ProtocolId::Dns), "family {family}");
     }
 }
+
+#[test]
+fn generated_labels_carry_translatable_keys() {
+    let d = full(&tcp_frame(tcpf::PSH | tcpf::ACK, b"hello world", 9000));
+    let model = nettrace_protocol::tree::to_model(&d.nodes);
+    fn find_key<'a>(nodes: &'a [nettrace_model::PacketField], key: &str) -> Option<&'a nettrace_model::PacketField> {
+        nodes.iter().find_map(|n| if n.label_key.as_deref() == Some(key) { Some(n) } else { find_key(&n.children, key) })
+    }
+    let payload = find_key(&model, "tcpPayload").expect("TCP payload node");
+    assert_eq!(payload.label_args.get("bytes").map(String::as_str), Some("11"));
+    assert!(find_key(&model, "frame").is_some());
+}
+
+#[test]
+fn every_label_key_is_translated_in_the_ui() {
+    let ru = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../apps/desktop/src/i18n/ru.ts")).unwrap();
+    let missing: Vec<_> = nettrace_protocol::labels::ALL.iter().filter(|k| !ru.contains(&format!("\"tree.{k}\""))).collect();
+    assert!(missing.is_empty(), "tree.* keys missing in ru.ts: {missing:?}");
+}

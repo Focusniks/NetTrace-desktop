@@ -4,6 +4,7 @@ use nettrace_packet::Cursor;
 use crate::context::{m, Ctx, Malformed, TcpInfo, TransportInfo};
 use crate::fields::{self as f, Field};
 use crate::format::{self, bits};
+use crate::labels;
 use crate::registry::{Dissector, Handoff, Layer};
 use crate::tcp_flags as fl;
 use crate::tree::Tree;
@@ -33,17 +34,19 @@ pub fn flags_string(flags: u16) -> String {
 
 /// Flag → (field, info prefix, severity). Fast retransmission is listed first
 /// because it supersedes the plain retransmission label.
-const ANALYSIS: [(u16, &Field, &str, Severity); 10] = [
-    (ta::FAST_RETRANSMISSION, &f::TCP_ANALYSIS_FAST_RETRANS, "[TCP Fast Retransmission]", Severity::Note),
-    (ta::RETRANSMISSION, &f::TCP_ANALYSIS_RETRANS, "[TCP Retransmission]", Severity::Note),
-    (ta::OUT_OF_ORDER, &f::TCP_ANALYSIS_OOO, "[TCP Out-Of-Order]", Severity::Warning),
-    (ta::LOST_SEGMENT, &f::TCP_ANALYSIS_LOST, "[TCP Previous segment not captured]", Severity::Warning),
-    (ta::ACKED_UNSEEN, &f::TCP_ANALYSIS_ACKED_UNSEEN, "[TCP ACKed unseen segment]", Severity::Warning),
-    (ta::DUPLICATE_ACK, &f::TCP_ANALYSIS_DUP_ACK, "[TCP Dup ACK]", Severity::Note),
-    (ta::ZERO_WINDOW, &f::TCP_ANALYSIS_ZERO_WINDOW, "[TCP ZeroWindow]", Severity::Warning),
-    (ta::KEEP_ALIVE, &f::TCP_ANALYSIS_KEEP_ALIVE, "[TCP Keep-Alive]", Severity::Note),
-    (ta::WINDOW_UPDATE, &f::TCP_ANALYSIS_WINDOW_UPDATE, "[TCP Window Update]", Severity::Note),
-    (ta::PORT_REUSE, &f::TCP_ANALYSIS_PORT_REUSE, "[TCP Port numbers reused]", Severity::Note),
+type AnalysisItem = (u16, &'static Field, &'static str, &'static str, Severity);
+
+const ANALYSIS: [AnalysisItem; 10] = [
+    (ta::FAST_RETRANSMISSION, &f::TCP_ANALYSIS_FAST_RETRANS, "[TCP Fast Retransmission]", labels::TA_FAST_RETRANSMISSION, Severity::Note),
+    (ta::RETRANSMISSION, &f::TCP_ANALYSIS_RETRANS, "[TCP Retransmission]", labels::TA_RETRANSMISSION, Severity::Note),
+    (ta::OUT_OF_ORDER, &f::TCP_ANALYSIS_OOO, "[TCP Out-Of-Order]", labels::TA_OUT_OF_ORDER, Severity::Warning),
+    (ta::LOST_SEGMENT, &f::TCP_ANALYSIS_LOST, "[TCP Previous segment not captured]", labels::TA_LOST_SEGMENT, Severity::Warning),
+    (ta::ACKED_UNSEEN, &f::TCP_ANALYSIS_ACKED_UNSEEN, "[TCP ACKed unseen segment]", labels::TA_ACKED_UNSEEN, Severity::Warning),
+    (ta::DUPLICATE_ACK, &f::TCP_ANALYSIS_DUP_ACK, "[TCP Dup ACK]", labels::TA_DUP_ACK, Severity::Note),
+    (ta::ZERO_WINDOW, &f::TCP_ANALYSIS_ZERO_WINDOW, "[TCP ZeroWindow]", labels::TA_ZERO_WINDOW, Severity::Warning),
+    (ta::KEEP_ALIVE, &f::TCP_ANALYSIS_KEEP_ALIVE, "[TCP Keep-Alive]", labels::TA_KEEP_ALIVE, Severity::Note),
+    (ta::WINDOW_UPDATE, &f::TCP_ANALYSIS_WINDOW_UPDATE, "[TCP Window Update]", labels::TA_WINDOW_UPDATE, Severity::Note),
+    (ta::PORT_REUSE, &f::TCP_ANALYSIS_PORT_REUSE, "[TCP Port numbers reused]", labels::TA_PORT_REUSE, Severity::Note),
 ];
 
 fn analysis_prefix(flags: u16) -> String {
@@ -52,7 +55,7 @@ fn analysis_prefix(flags: u16) -> String {
     if flags & ta::FAST_RETRANSMISSION != 0 {
         flags &= !ta::RETRANSMISSION;
     }
-    for (bit, _, label, _) in ANALYSIS {
+    for (bit, _, label, _, _) in ANALYSIS {
         if flags & bit != 0 {
             out.push_str(label);
             out.push(' ');
@@ -279,13 +282,15 @@ impl Dissector for Tcp {
         let options = if hdr_len > 20 {
             t.open(&f::TCP_OPTIONS, start + 20, hdr_len - 20);
             let n = hdr_len - 20;
-            t.heading(|| format!("Options: ({})", format::plural_bytes(n)));
+            t.heading_key(labels::TCP_OPTIONS, || vec![("bytes", n.to_string())], || format!("Options: ({})", format::plural_bytes(n)));
             let parsed = parse_options(t, opts_cursor);
             if opts_truncated {
-                t.expert(&f::TCP_OPTIONS, Severity::Warning, || "[Options truncated by the capture length]".to_owned());
+                t.expert_key(&f::TCP_OPTIONS, Severity::Warning, labels::TCP_OPTIONS_TRUNCATED, Vec::new, || {
+                    "[Options truncated by the capture length]".to_owned()
+                });
             }
             if parsed.is_err() {
-                t.expert(&f::TCP_OPTIONS, Severity::Warning, || "[Malformed TCP options]".to_owned());
+                t.expert_key(&f::TCP_OPTIONS, Severity::Warning, labels::TCP_OPTIONS_MALFORMED, Vec::new, || "[Malformed TCP options]".to_owned());
             }
             t.close();
             parsed.unwrap_or_default()
@@ -296,16 +301,22 @@ impl Dissector for Tcp {
         if let Some(a) = &ann {
             if t.enabled() {
                 let since = a.time_since_first_ns;
-                t.open_text(|| "[Timestamps]".to_owned(), 0, 0);
+                t.open_text_key(labels::TCP_TIMESTAMPS, || "[Timestamps]".to_owned(), 0, 0);
                 t.mark_generated();
                 t.generated(&f::TCP_TIME_RELATIVE, FieldValue::F64(since as f64 / 1e9), || format::seconds(since));
                 t.close();
                 if a.analysis != 0 || a.ack_rtt_ns.is_some() || a.acked_frame.is_some() {
                     t.open(&f::TCP_ANALYSIS, 0, 0);
                     t.mark_generated();
-                    t.heading(|| "[SEQ/ACK analysis]".to_owned());
+                    t.heading_key(labels::TCP_SEQ_ACK, Vec::new, || "[SEQ/ACK analysis]".to_owned());
                     if let Some(frame) = a.acked_frame {
-                        t.text(|| format!("[This is an ACK to the segment in frame: {frame}]"), 0, 0);
+                        t.text_key(
+                            labels::TCP_ACK_TO,
+                            || vec![("frame", frame.to_string())],
+                            || format!("[This is an ACK to the segment in frame: {frame}]"),
+                            0,
+                            0,
+                        );
                     }
                     if let Some(rtt) = a.ack_rtt_ns {
                         t.generated(&f::TCP_ANALYSIS_ACK_RTT, FieldValue::F64(rtt as f64 / 1e9), || format::seconds(rtt));
@@ -313,10 +324,10 @@ impl Dissector for Tcp {
                     if a.analysis != 0 {
                         t.open(&f::TCP_ANALYSIS_FLAGS, 0, 0);
                         t.mark_generated();
-                        t.heading(|| "[TCP Analysis Flags]".to_owned());
-                        for (bit, field, label, sev) in ANALYSIS {
+                        t.heading_key(labels::TCP_ANALYSIS_FLAGS, Vec::new, || "[TCP Analysis Flags]".to_owned());
+                        for (bit, field, label, key, sev) in ANALYSIS {
                             if a.analysis & bit != 0 {
-                                t.expert(field, sev, || format!("{label} {}", field.name));
+                                t.expert_key(field, sev, key, Vec::new, || format!("{label} {}", field.name));
                             }
                         }
                         t.close();
@@ -333,7 +344,9 @@ impl Dissector for Tcp {
             if retransmitted {
                 t.bytes(&f::TCP_SEGMENT_DATA, payload_start, payload);
             } else if t.full() {
-                t.text(
+                t.text_key(
+                    if captured_payload < payload_len { labels::TCP_PAYLOAD_PARTIAL } else { labels::TCP_PAYLOAD },
+                    || vec![("bytes", payload_len.to_string()), ("captured", captured_payload.to_string())],
                     || {
                         let mut s = format!("TCP payload ({})", format::plural_bytes(payload_len));
                         if captured_payload < payload_len {

@@ -386,6 +386,7 @@ pub fn conversation_row(kind: ConversationKind, c: &ConvStats, addrs: &AddressTa
         b_to_a_packets: u64::from(c.b_to_a_packets),
         b_to_a_bytes: c.b_to_a_bytes,
         start: c.first_ns.saturating_sub(base_ns) as f64 / 1e9,
+        end: c.last_ns.saturating_sub(base_ns) as f64 / 1e9,
         duration: c.last_ns.saturating_sub(c.first_ns) as f64 / 1e9,
         state: None,
         stream: None,

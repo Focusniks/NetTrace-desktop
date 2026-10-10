@@ -208,6 +208,10 @@ pub struct FlowTable {
     udp_streams: Vec<u32>,
     /// RTT samples of all flows in capture order of the acknowledging packet.
     rtt: Vec<RttSample>,
+    /// TCP flows that got packets since the last idle sweep (candidates of [`FlowTable::evict_idle`]).
+    active_tcp: Vec<u32>,
+    /// Only live captures sweep idle flows; files never pay for the list.
+    track_idle: bool,
 }
 
 impl FlowTable {
@@ -255,8 +259,36 @@ impl FlowTable {
         }
         self.flows.shrink_to_fit();
         self.rtt.shrink_to_fit();
+        self.active_tcp = Vec::new();
         self.tcp_streams.shrink_to_fit();
         self.udp_streams.shrink_to_fit();
+    }
+
+    /// Enables [`FlowTable::evict_idle`] (live captures). Call before the first packet.
+    pub fn track_idle(&mut self) {
+        self.track_idle = true;
+    }
+
+    /// Frees the analysis state of TCP flows without packets for `idle_ns`
+    /// (capture time `now_ns`). Costs O(flows active since the last sweep).
+    /// Returns how many flows were processed.
+    pub fn evict_idle(&mut self, now_ns: i64, idle_ns: i64) -> usize {
+        let mut evicted = 0;
+        let flows = &mut self.flows;
+        self.active_tcp.retain(|&i| {
+            let f = &mut flows[i as usize];
+            if now_ns.saturating_sub(f.last_ts_ns) < idle_ns {
+                return true;
+            }
+            let has_data = f.c2s.payload + f.s2c.payload > 0;
+            if let Some(t) = f.tcp.as_deref_mut() {
+                t.evict_idle(has_data);
+                t.swept();
+            }
+            evicted += 1;
+            false
+        });
+        evicted
     }
 
     fn find(&self, key: &FlowKey) -> Option<u32> {
@@ -360,6 +392,9 @@ impl FlowTable {
         }
         let mut analysis = extra;
         if let (FlowKind::Tcp(seg), Some(tcp)) = (p.kind, flow.tcp.as_deref_mut()) {
+            if self.track_idle && tcp.mark_active() {
+                self.active_tcp.push(index);
+            }
             let a = tcp.analyse(p.index, p.ts_ns, dir, &seg);
             analysis |= a.flags;
             if let Some(sample) = a.rtt {

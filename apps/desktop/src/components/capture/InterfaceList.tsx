@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { api, BackendError } from "../../api/client";
 import type { CaptureInterface } from "../../api/types";
 import { t } from "../../i18n";
+import { errorText } from "../../state/store";
 
 export interface InterfacesState {
   loading: boolean;
@@ -30,9 +31,9 @@ export function useInterfaces(): InterfacesState & { reload: () => void } {
         if (cancelled) return;
         const err = e as BackendError;
         if (err.code === "capture_unavailable") {
-          setState({ loading: false, library: null, unavailable: err.message, error: null, interfaces: [] });
+          setState({ loading: false, library: null, unavailable: errorText(err), error: null, interfaces: [] });
         } else {
-          setState({ loading: false, library: null, unavailable: null, error: err.message, interfaces: [] });
+          setState({ loading: false, library: null, unavailable: null, error: errorText(err), interfaces: [] });
         }
       }
     })();
@@ -49,7 +50,7 @@ export function interfaceLabel(i: CaptureInterface): string {
 }
 
 interface Props {
-  state: InterfacesState;
+  state: InterfacesState & { reload?: () => void };
   selected: string | null;
   onSelect: (name: string) => void;
   onStart: (name: string) => void;
@@ -66,10 +67,26 @@ export function InterfaceList({ state, selected, onSelect, onStart, maxHeight }:
         <p className="faint mono" style={{ fontSize: 10.5 }}>
           {state.unavailable}
         </p>
+        {state.reload ? (
+          <button className="btn btn-small" onClick={state.reload}>
+            {t("capture.retry")}
+          </button>
+        ) : null}
       </div>
     );
   }
-  if (state.error) return <div style={{ color: "var(--error)" }}>{t("common.error", { message: state.error })}</div>;
+  if (state.error) {
+    return (
+      <div style={{ color: "var(--error)" }}>
+        {t("common.error", { message: state.error })}{" "}
+        {state.reload ? (
+          <button className="link" onClick={state.reload}>
+            {t("capture.retry")}
+          </button>
+        ) : null}
+      </div>
+    );
+  }
   if (!state.interfaces.length) return <div className="muted">{t("capture.none")}</div>;
   // Active interfaces with addresses first.
   const list = [...state.interfaces].sort((a, b) => Number(b.up && b.running) - Number(a.up && a.running) || b.addresses.length - a.addresses.length);

@@ -5,3 +5,32 @@ updates:
     directory: /
     schedule:
       interval: monthly
+
+  # Rust crates (security fixes come as separate PRs immediately).
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      # The Tauri CLI refuses mismatched crate/npm versions: update them together, by hand.
+      tauri:
+        patterns: ["tauri*"]
+      minor-and-patch:
+        update-types: [minor, patch]
+    ignore:
+      - dependency-name: "tauri*"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
+
+  # Frontend packages.
+  - package-ecosystem: npm
+    directory: /apps/desktop
+    schedule:
+      interval: weekly
+    groups:
+      tauri:
+        patterns: ["@tauri-apps/*"]
+      minor-and-patch:
+        update-types: [minor, patch]
+    ignore:
+      - dependency-name: "@tauri-apps/*"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]

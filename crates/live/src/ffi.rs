@@ -7,7 +7,7 @@
 #![allow(unsafe_code)]
 
 use std::ffi::{c_char, c_int, c_uint, c_void, CStr, CString};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use libloading::Library;
@@ -142,11 +142,15 @@ fn candidates() -> Vec<std::path::PathBuf> {
 
 #[cfg(windows)]
 fn load(path: &std::path::Path) -> Result<Library, libloading::Error> {
-    // Npcap's wpcap.dll depends on Packet.dll in the same directory.
-    const LOAD_WITH_ALTERED_SEARCH_PATH: u32 = 0x0000_0008;
+    // Npcap's wpcap.dll depends on Packet.dll in the same directory. Its
+    // dependencies are looked up only there and in the system directories,
+    // never in the current directory or PATH (no DLL planting).
+    const LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR: u32 = 0x0000_0100;
+    const LOAD_LIBRARY_SEARCH_DEFAULT_DIRS: u32 = 0x0000_1000;
+    let flags = LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS;
     // SAFETY: loading the vendor capture library runs its initialisation code;
     // the path comes from the system directory, not from capture data.
-    unsafe { libloading::os::windows::Library::load_with_flags(path, LOAD_WITH_ALTERED_SEARCH_PATH).map(Into::into) }
+    unsafe { libloading::os::windows::Library::load_with_flags(path, flags).map(Into::into) }
 }
 
 #[cfg(not(windows))]
@@ -327,10 +331,38 @@ fn activate_error(rc: c_int, detail: &str) -> String {
     if detail.is_empty() { what.to_owned() } else { format!("{what}: {detail}") }
 }
 
-static API: OnceLock<Result<Api, String>> = OnceLock::new();
+/// A value loaded once on success; a failed load is retried on the next call
+/// (Npcap may be installed while the app is running).
+pub(crate) struct RetryCell<T> {
+    value: OnceLock<T>,
+    loading: Mutex<()>,
+}
 
+impl<T> RetryCell<T> {
+    pub(crate) const fn new() -> Self {
+        RetryCell { value: OnceLock::new(), loading: Mutex::new(()) }
+    }
+
+    pub(crate) fn get_or_try_init(&self, load: impl FnOnce() -> Result<T, String>) -> Result<&T, String> {
+        if let Some(v) = self.value.get() {
+            return Ok(v);
+        }
+        // One loader at a time; the others then find the loaded value.
+        let _guard = self.loading.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(v) = self.value.get() {
+            return Ok(v);
+        }
+        let v = load()?;
+        Ok(self.value.get_or_init(|| v))
+    }
+}
+
+static API: RetryCell<Api> = RetryCell::new();
+
+/// The capture library. The DLL is never unloaded once loaded, so the
+/// reference stays valid for the process lifetime.
 pub fn api() -> Result<&'static Api, LiveError> {
-    API.get_or_init(Api::load).as_ref().map_err(|e| LiveError::NotAvailable(e.clone()))
+    API.get_or_try_init(Api::load).map_err(LiveError::NotAvailable)
 }
 
 /// An activated pcap handle.
@@ -410,5 +442,26 @@ impl Drop for PcapSource {
     fn drop(&mut self) {
         // SAFETY: the handle is owned by this value and closed exactly once.
         unsafe { (self.api.close)(self.handle) };
+    }
+}
+
+#[cfg(test)]
+mod retry_tests {
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    use super::RetryCell;
+
+    #[test]
+    fn a_failed_load_is_retried_and_a_success_is_kept() {
+        let cell: RetryCell<u32> = RetryCell::new();
+        let calls = AtomicU32::new(0);
+        let load = || {
+            let n = calls.fetch_add(1, Ordering::SeqCst);
+            if n == 0 { Err("not installed".to_owned()) } else { Ok(42) }
+        };
+        assert_eq!(cell.get_or_try_init(load), Err("not installed".to_owned()));
+        assert_eq!(cell.get_or_try_init(load), Ok(&42));
+        assert_eq!(cell.get_or_try_init(load), Ok(&42));
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
     }
 }

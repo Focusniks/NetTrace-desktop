@@ -1,19 +1,10 @@
 // User commands shared by the menu bar, toolbar and keyboard shortcuts.
 
-import { api, BackendError, pickCaptureFile } from "../api/client";
-import { t, type MessageKey } from "../i18n";
-import { useStore, type DockTab } from "./store";
+import { api, pickCaptureFile } from "../api/client";
+import { t } from "../i18n";
+import { errorText, useStore, type DockTab } from "./store";
 
 const s = () => useStore.getState();
-
-function message(e: unknown): string {
-  if (e instanceof BackendError) {
-    const key = `err.${e.code}` as MessageKey;
-    const known = t(key);
-    return known === key ? e.message : known;
-  }
-  return (e as Error).message ?? String(e);
-}
 
 /** True while a live capture is still recording packets. */
 export function isCapturing(): boolean {
@@ -69,7 +60,7 @@ export const commands = {
       cur.flash(t(partial ? "status.exportedPartial" : "status.exported", { n }));
       return true;
     } catch (e) {
-      s().flash(t("common.error", { message: message(e) }));
+      s().flash(t("common.error", { message: errorText(e) }));
       return false;
     }
   },
@@ -96,7 +87,7 @@ export const commands = {
       // Restarting discards the current packets: ask to save them first.
       await s().guardUnsaved(() => s().startCapture(opts));
     } catch (e) {
-      s().flash(t("common.error", { message: message(e) }));
+      s().flash(t("common.error", { message: errorText(e) }));
     }
   },
   toggleAutoScroll() {

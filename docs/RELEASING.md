@@ -25,16 +25,23 @@ NetTrace распространяется через [GitHub Releases](https://g
 `## [1.0.1] - дата`, делает коммит и тег `v1.0.1` и отправляет их на GitHub.
 Если что-то пошло не так до отправки, файлы, коммит и тег откатываются.
 
-Дальше всё делает GitHub Actions (`.github/workflows/release.yml`):
-1. проверяет, что тег стоит на коммите из `main` и совпадает с версией во всех файлах;
-2. прогоняет тесты Rust и фронтенда, clippy;
-3. собирает установщик NSIS и подписывает пакет обновления;
-4. загружает в черновик релиза `NetTrace_X.Y.Z_x64-setup.exe`, `.sig` и `latest.json`;
+Дальше всё делает GitHub Actions (`.github/workflows/release.yml`), тремя задачами:
+1. **preflight** — тег стоит на коммите из `main`, совпадает с версией во всех
+   файлах, есть заметки к версии и секреты подписи;
+2. **build** — тесты Rust и фронтенда, clippy и сборка установщика NSIS. Эта
+   задача **не видит ключ подписи**: ни один скрипт сборки зависимостей не может
+   его прочитать (обновляемые артефакты отключены в `tauri.release.conf.json`);
+3. **sign-publish** — проверяет хэш установщика, подписывает его одним шагом
+   (`tauri signer sign --app-version`; ключ есть только в этом шаге), пишет
+   `latest.json` (`scripts/release-ci.mjs latest`) и загружает в черновик релиза
+   `NetTrace_X.Y.Z_x64-setup.exe`, `.sig` и `latest.json`;
 5. проверяет `latest.json`: версия, ссылка на этот релиз, подпись сделана
    ключом, которому доверяет приложение, и подписана именно эта версия;
 6. только после этого публикует релиз.
 
 Если сборка упала, релиз остаётся черновиком (пользователи его не видят).
+Собранный установщик хранится между задачами одни сутки: перезапуск только
+задачи подписи (Re-run failed jobs) возможен в этот срок, позже — весь workflow.
 Исправьте причину и либо перезапустите workflow (Actions → Re-run jobs),
 либо удалите черновик и тег (`git push --delete origin vX.Y.Z`,
 `git tag -d vX.Y.Z`) и выпустите следующую версию.
@@ -99,12 +106,21 @@ NetTrace распространяется через [GitHub Releases](https://g
 
 ```bash
 cd apps/desktop
-npm run tauri build
+npm run tauri -- build --config src-tauri/tauri.release.conf.json
 ```
 
-Для сборки с `createUpdaterArtifacts` нужны переменные
-`TAURI_SIGNING_PRIVATE_KEY` и `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
-Результат: `target/release/bundle/nsis/`.
+Ключ для сборки не нужен. Результат: `target/release/bundle/nsis/`. Подписать
+установщик вручную (для своих тестов обновления):
+
+```bash
+npx tauri signer sign --app-version X.Y.Z -f путь/к/ключу target/release/bundle/nsis/NetTrace_X.Y.Z_x64-setup.exe
+```
+
+## Проверка зависимостей
+
+Dependabot обновляет GitHub Actions, Rust-крейты и npm-пакеты (Tauri — вручную:
+версии крейта и npm-пакета должны совпадать). В CI задача «Dependency audit»
+запускает `cargo audit` и `npm audit --omit=dev` при каждом изменении и раз в неделю.
 
 ## Конфиденциальность
 

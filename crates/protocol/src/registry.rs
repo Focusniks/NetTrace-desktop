@@ -14,6 +14,7 @@ use nettrace_packet::{Cursor, LinkType};
 
 use crate::context::{Ctx, DissectOptions, FrameContext, Malformed, Summary};
 use crate::fields::{self, Field};
+use crate::labels;
 use crate::tree::{Node, Tree};
 use crate::{app, link, net, transport};
 
@@ -207,7 +208,7 @@ pub fn dissect_with(reg: &Registry, frame: &[u8], fctx: &FrameContext, opts: Dis
             ctx.push_protocol(ProtocolId::Frame);
             ctx.push_protocol(ProtocolId::Malformed);
             ctx.summary.malformed = true;
-            ctx.tree.expert(&fields::MALFORMED, Severity::Error, || {
+            ctx.tree.expert_key(&fields::MALFORMED, Severity::Error, labels::MALFORMED_PANIC, Vec::new, || {
                 "[Malformed Packet: dissector failure]".to_owned()
             });
             ctx.info.set(ProtocolId::Malformed, || "[Malformed Packet]".to_owned());
@@ -316,7 +317,7 @@ fn data(ctx: &mut Ctx, layer: Layer) {
     let bytes = layer.bytes();
     let n = bytes.len();
     ctx.tree.open(&fields::DATA, layer.start, n);
-    ctx.tree.heading(|| format!("Data ({})", crate::format::plural_bytes(n)));
+    ctx.tree.heading_key(labels::DATA, || vec![("bytes", n.to_string())], || format!("Data ({})", crate::format::plural_bytes(n)));
     ctx.tree.bytes(&fields::DATA_DATA, layer.start, bytes);
     ctx.tree.generated(&fields::DATA_LEN, FieldValue::U64(n as u64), || n.to_string());
     ctx.tree.close();
@@ -326,7 +327,8 @@ fn malformed(ctx: &mut Ctx, mal: Malformed) {
     ctx.summary.malformed = true;
     ctx.push_protocol(ProtocolId::Malformed);
     let name = mal.protocol.short_name();
-    ctx.tree.expert(&fields::MALFORMED, Severity::Error, || {
+    let args = || vec![("proto", name.to_owned()), ("offset", mal.offset.to_string())];
+    ctx.tree.expert_key(&fields::MALFORMED, Severity::Error, labels::MALFORMED, args, || {
         format!("[Malformed Packet: {name}] (offset {})", mal.offset)
     });
     if ctx.info.enabled() {
@@ -343,7 +345,8 @@ fn malformed(ctx: &mut Ctx, mal: Malformed) {
 /// fragmentation without reassembly): a note, not a malformed packet.
 fn unreassembled(ctx: &mut Ctx, mal: Malformed) {
     let name = mal.protocol.short_name();
-    ctx.tree.expert(&fields::EXPERT, Severity::Warning, || {
+    let args = || vec![("proto", name.to_owned()), ("offset", mal.offset.to_string())];
+    ctx.tree.expert_key(&fields::EXPERT, Severity::Warning, labels::UNREASSEMBLED, args, || {
         format!("[{name} message is incomplete in this packet (offset {}): not reassembled]", mal.offset)
     });
     if ctx.info.enabled() {

@@ -17,6 +17,7 @@ nettrace-storage.workspace = true
 nettrace-query.workspace = true
 parking_lot.workspace = true
 rayon.workspace = true
+getrandom.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 

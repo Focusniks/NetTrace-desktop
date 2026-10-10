@@ -57,6 +57,8 @@ export interface Settings {
   autoUpdateCheck: boolean;
   /** Release the user chose to skip ("Пропустить эту версию"). */
   skippedVersion: string | null;
+  /** Outcome of the last update check (a failed startup check is otherwise silent). */
+  lastUpdateCheck: { at: string; ok: boolean; error: string | null } | null;
 }
 
 const KEY = "nettrace.settings.v1";
@@ -75,6 +77,7 @@ export const DEFAULT_SETTINGS: Settings = {
   lastCapture: null,
   autoUpdateCheck: true,
   skippedVersion: null,
+  lastUpdateCheck: null,
 };
 
 function sanitizeColumns(cols: unknown): ColumnConfig[] {
@@ -141,7 +144,13 @@ export function sanitizeSettings(raw: unknown): Settings {
     lastCapture: sanitizeCapture(raw.lastCapture),
     autoUpdateCheck: raw.autoUpdateCheck !== false,
     skippedVersion: typeof raw.skippedVersion === "string" ? raw.skippedVersion : null,
+    lastUpdateCheck: sanitizeCheck(raw.lastUpdateCheck),
   };
+}
+
+function sanitizeCheck(v: unknown): Settings["lastUpdateCheck"] {
+  if (!isObj(v) || typeof v.at !== "string" || Number.isNaN(Date.parse(v.at)) || typeof v.ok !== "boolean") return null;
+  return { at: v.at, ok: v.ok, error: typeof v.error === "string" ? v.error : null };
 }
 
 export function loadSettings(): Settings {

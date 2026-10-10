@@ -2,25 +2,25 @@ import { useEffect, useRef, useState } from "react";
 
 import { api } from "../../api/client";
 import { TcpAnalysis, type FlowSummary, type SequenceEntry, type StreamRef } from "../../api/types";
-import { t } from "../../i18n";
+import { t, type MessageKey } from "../../i18n";
 import { fmtEndpoint } from "../../lib/format";
 import { computeWindow } from "../../lib/virtual";
-import { useStore } from "../../state/store";
+import { errorText, useStore } from "../../state/store";
 
 const ROW_H = 30;
 const PAGE = 500;
 const MAX_PAGES = 40;
 const GRID = "48px 82px minmax(200px, 1fr) 176px";
 
-const FLAG_BADGES: [number, string, "warn" | "error" | "note"][] = [
-  [TcpAnalysis.FAST_RETRANSMISSION, "Fast Retr.", "warn"],
-  [TcpAnalysis.RETRANSMISSION, "Retr.", "warn"],
-  [TcpAnalysis.OUT_OF_ORDER, "OOO", "warn"],
-  [TcpAnalysis.DUPLICATE_ACK, "Dup ACK", "note"],
-  [TcpAnalysis.LOST_SEGMENT, "Lost", "error"],
-  [TcpAnalysis.ZERO_WINDOW, "Zero win", "error"],
-  [TcpAnalysis.KEEP_ALIVE, "Keep-alive", "note"],
-  [TcpAnalysis.WINDOW_UPDATE, "Win upd", "note"],
+const FLAG_BADGES: [number, MessageKey, "warn" | "error" | "note"][] = [
+  [TcpAnalysis.FAST_RETRANSMISSION, "seq.badge.fastRetr", "warn"],
+  [TcpAnalysis.RETRANSMISSION, "seq.badge.retr", "warn"],
+  [TcpAnalysis.OUT_OF_ORDER, "seq.badge.ooo", "warn"],
+  [TcpAnalysis.DUPLICATE_ACK, "seq.badge.dupAck", "note"],
+  [TcpAnalysis.LOST_SEGMENT, "seq.badge.lost", "error"],
+  [TcpAnalysis.ZERO_WINDOW, "seq.badge.zeroWin", "error"],
+  [TcpAnalysis.KEEP_ALIVE, "seq.badge.keepAlive", "note"],
+  [TcpAnalysis.WINDOW_UPDATE, "seq.badge.winUpd", "note"],
 ];
 
 function badges(flags: number) {
@@ -28,7 +28,7 @@ function badges(flags: number) {
   let f = flags;
   if (f & TcpAnalysis.FAST_RETRANSMISSION) f &= ~TcpAnalysis.RETRANSMISSION;
   for (const [bit, label, kind] of FLAG_BADGES) {
-    if (f & bit) out.push(<span key={label} className={`badge badge-${kind}`}>{label}</span>);
+    if (f & bit) out.push(<span key={label} className={`badge badge-${kind}`}>{t(label)}</span>);
   }
   return out;
 }
@@ -62,7 +62,7 @@ function Sequence({ stream }: { stream: StreamRef }) {
     setPages(new Map());
     setError(null);
     const fail = (e: Error) => {
-      if (my === gen.current) setError(e.message);
+      if (my === gen.current) setError(errorText(e));
     };
     api
       .flow(stream)
@@ -91,7 +91,7 @@ function Sequence({ stream }: { stream: StreamRef }) {
     if (tick === 0) return;
     const my = gen.current;
     const fail = (e: Error) => {
-      if (my === gen.current) setError(e.message);
+      if (my === gen.current) setError(errorText(e));
     };
     api
       .flow(stream)
@@ -142,7 +142,7 @@ function Sequence({ stream }: { stream: StreamRef }) {
             return next;
           });
         })
-        .catch((e: Error) => my === gen.current && setError(e.message))
+        .catch((e: Error) => my === gen.current && setError(errorText(e)))
         .finally(() => {
           if (my === gen.current) pending.current.delete(p);
         });
@@ -159,8 +159,8 @@ function Sequence({ stream }: { stream: StreamRef }) {
     const meta = [
       e.seq != null ? `Seq=${e.seq}` : null,
       e.ack != null ? `Ack=${e.ack}` : null,
-      `Len=${e.len}`,
-      e.window != null ? `Win=${e.window}` : null,
+      `${t("seq.meta.len")}=${e.len}`,
+      e.window != null ? `${t("seq.meta.win")}=${e.window}` : null,
     ]
       .filter(Boolean)
       .join(" ");
@@ -169,8 +169,8 @@ function Sequence({ stream }: { stream: StreamRef }) {
         key={e.number}
         className={`seq-row${e.number === selected ? " is-selected" : ""}`}
         style={{ gridTemplateColumns: GRID }}
-        onClick={() => void useStore.getState().selectPacket(e.number)}
-        title={`№${e.number} · ${e.label}`}
+        onClick={() => void useStore.getState().selectPacket(e.number, { reveal: false })}
+        title={`№${e.number} · ${e.label} · ${meta}`}
       >
         <span className="seq-num num">{e.number}</span>
         <span className="seq-time">{(streamTime ? e.timeStream : e.timeRel).toFixed(6)}</span>
@@ -218,7 +218,7 @@ function Sequence({ stream }: { stream: StreamRef }) {
                 {flow ? fmtEndpoint(flow.server.addr, flow.server.port) : ""}
               </span>
             </span>
-            <span className="seq-meta">Seq / Ack / Len / Win</span>
+            <span className="seq-meta">{t("seq.col.meta")}</span>
           </div>
           <div ref={bodyRef} className="seq-body" onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}>
             <div style={{ height: win.contentHeight, position: "relative" }}>

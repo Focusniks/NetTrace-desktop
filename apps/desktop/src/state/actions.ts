@@ -13,12 +13,16 @@ export function filterByTerm(term: string, mode: FilterMode, apply: boolean): vo
   const s = useStore.getState();
   const next = combineFilters(s.appliedFilter || s.filterText, term, mode);
   s.setFilterText(next);
-  if (apply) void s.applyFilter(next);
+  if (apply) {
+    s.revealPackets();
+    void s.applyFilter(next);
+  }
 }
 
 export function applyFilterText(text: string): void {
   const s = useStore.getState();
   s.setFilterText(text);
+  s.revealPackets();
   void s.applyFilter(text);
 }
 

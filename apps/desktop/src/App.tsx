@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 
-import { api, inTauri, onFileDrop, onProgress } from "./api/client";
+import { api, inTauri, onFileDrag, onProgress } from "./api/client";
 import { ContextMenuHost } from "./components/common/ContextMenu";
 import { ErrorBoundary } from "./components/common/ErrorBoundary";
 import { Dialogs } from "./components/dialogs/Dialogs";
@@ -14,7 +14,7 @@ import { StatusBar } from "./components/layout/StatusBar";
 import { Toolbar } from "./components/layout/Toolbar";
 import { t } from "./i18n";
 import { commands } from "./state/commands";
-import { syncColoringRules, useStore } from "./state/store";
+import { errorText, syncColoringRules, useStore } from "./state/store";
 import { checkForUpdates } from "./state/updater";
 
 /**
@@ -107,9 +107,11 @@ export function App() {
     const unsubs: (() => void)[] = [];
     const keep = (u: () => void) => (disposed ? u() : unsubs.push(u));
     void onProgress((p) => useStore.getState().onProgress(p)).then(keep);
-    void onFileDrop((paths) => {
-      setDragging(false);
-      if (paths[0]) void commands.openPath(paths[0]);
+    void onFileDrag({
+      onHover: setDragging,
+      onDrop: (paths) => {
+        if (paths[0]) void commands.openPath(paths[0]);
+      },
     }).then(keep);
     return () => {
       disposed = true;
@@ -121,7 +123,7 @@ export function App() {
     // One-time startup work (must not run twice under StrictMode).
     if (startupDone) return;
     startupDone = true;
-    const fail = (e: unknown) => useStore.getState().flash(t("common.error", { message: (e as Error).message ?? String(e) }));
+    const fail = (e: unknown) => useStore.getState().flash(t("common.error", { message: errorText(e) }));
     void api.fields().then((fields) => useStore.setState({ fields })).catch(fail);
     void syncColoringRules();
     // Dev bridge only: `?open=<path>` opens a capture without a native dialog.

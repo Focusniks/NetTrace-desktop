@@ -9,6 +9,7 @@ use crate::app::x509;
 use crate::context::{m, Ctx, Malformed};
 use crate::fields as f;
 use crate::format;
+use crate::labels;
 use crate::names;
 use crate::registry::{AppDissector, Layer};
 use crate::transport::tcp::info_prefix;
@@ -135,7 +136,9 @@ impl AppDissector for Tls {
                 }
             }
             if available < len {
-                t.text(
+                t.text_key(
+                    labels::TLS_RECORD_CONTINUES,
+                    || vec![("captured", available.to_string()), ("len", len.to_string())],
                     || format!("[Record continues in the next segment: {} of {len} bytes captured; reassembly is not supported]", available),
                     frag_at,
                     available,
@@ -208,7 +211,7 @@ fn handshake(t: &mut Tree, fragment: &[u8], base: usize, facts: &mut Facts) -> R
         if continues {
             r = Ok(());
             t.close_to(depth + 1);
-            t.text(|| "[Handshake message continues in the next segment]".to_owned(), at, 0);
+            t.text_key(labels::TLS_HANDSHAKE_CONTINUES, Vec::new, || "[Handshake message continues in the next segment]".to_owned(), at, 0);
         }
         t.close_to(depth);
         let label = match (ty, &facts.sni) {

@@ -1,6 +1,7 @@
 //! Find the next/previous packet in a view matching a filter, a string or bytes.
 
 use nettrace_model::{FieldValue, ProtocolId};
+use nettrace_protocol::tree::Node;
 use nettrace_protocol::{dissect, DissectOptions};
 use nettrace_query::Filter;
 use nettrace_storage::CaptureFile;
@@ -9,7 +10,7 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 
 use crate::error::{EngineError, Result};
-use crate::fields::PacketFields;
+use crate::fields::{id_of, PacketFields};
 use crate::frame::frame_context;
 use crate::session::Shared;
 use crate::view::{read_error, View};
@@ -46,6 +47,20 @@ pub struct SearchHit {
     pub row: u32,
     pub number: u32,
     pub wrapped: bool,
+    /// What matched inside the packet, when it can be pointed at.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub location: Option<MatchLocation>,
+}
+
+/// The match inside a packet: a field of the details tree (index path, as in
+/// `packet_detail`) and/or a byte range of the frame.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MatchLocation {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<Vec<u32>>,
+    pub start: u32,
+    pub len: u32,
 }
 
 enum Matcher {
@@ -54,14 +69,54 @@ enum Matcher {
     Bytes(Vec<u8>),
 }
 
-fn find(hay: &[u8], needle: &[u8], case_sensitive: bool) -> bool {
+/// Offset of the first occurrence of `needle` in `hay`.
+fn find_at(hay: &[u8], needle: &[u8], case_sensitive: bool) -> Option<usize> {
     if needle.is_empty() || hay.len() < needle.len() {
-        return false;
+        return None;
     }
     if case_sensitive {
-        hay.windows(needle.len()).any(|w| w == needle)
+        hay.windows(needle.len()).position(|w| w == needle)
     } else {
-        hay.windows(needle.len()).any(|w| w.eq_ignore_ascii_case(needle))
+        hay.windows(needle.len()).position(|w| w.eq_ignore_ascii_case(needle))
+    }
+}
+
+fn find(hay: &[u8], needle: &[u8], case_sensitive: bool) -> bool {
+    find_at(hay, needle, case_sensitive).is_some()
+}
+
+/// First node (pre-order) satisfying `pred`, with its index path.
+fn first_node(nodes: &[Node], path: &mut Vec<u32>, pred: &mut dyn FnMut(&Node) -> bool) -> Option<(Vec<u32>, usize, usize)> {
+    for (i, n) in nodes.iter().enumerate() {
+        path.push(i as u32);
+        if pred(n) {
+            return Some((path.clone(), n.start, n.len));
+        }
+        if let Some(found) = first_node(&n.children, path, pred) {
+            return Some(found);
+        }
+        path.pop();
+    }
+    None
+}
+
+/// Where the match is inside a packet already known to match (one extra
+/// dissection per hit, none during the scan).
+fn locate(sh: &Shared, file: &CaptureFile, index: u32, m: &Matcher) -> Option<MatchLocation> {
+    let meta = sh.index.get(index)?;
+    let bytes = file.read(meta).ok()?;
+    let at = |start: usize, len: usize| MatchLocation { path: None, start: start as u32, len: len as u32 };
+    let in_tree = |pred: &mut dyn FnMut(&Node) -> bool| {
+        let d = dissect(&bytes, &frame_context(sh, index), DissectOptions::FULL);
+        first_node(&d.nodes, &mut Vec::new(), pred)
+            .map(|(path, start, len)| MatchLocation { path: Some(path), start: start as u32, len: len as u32 })
+    };
+    match m {
+        Matcher::Bytes(needle) => find_at(&bytes, needle, true).map(|s| at(s, needle.len())),
+        Matcher::Text { needle, case_sensitive } => find_at(&bytes, needle, *case_sensitive).map(|s| at(s, needle.len())).or_else(|| {
+            in_tree(&mut |n| matches!(&n.value, FieldValue::Str(s) if find(s.as_bytes(), needle, *case_sensitive)))
+        }),
+        Matcher::Filter(f) => in_tree(&mut |n| n.field.and_then(id_of).is_some_and(|id| f.witness(id, &n.value))),
     }
 }
 
@@ -164,7 +219,8 @@ pub fn search(
             if r? {
                 let (row, wrapped) = chunk[pos];
                 let number = view.packet_at(&sh, row).unwrap_or(0) + 1;
-                return Ok(Some(SearchHit { row, number, wrapped }));
+                let location = view.packet_at(&sh, row).and_then(|index| locate(&sh, file, index, &matcher));
+                return Ok(Some(SearchHit { row, number, wrapped, location }));
             }
         }
     }

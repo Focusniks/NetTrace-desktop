@@ -39,7 +39,7 @@ use serde::Deserialize;
 
 pub use error::{EngineError, Result};
 pub use indexer::ProgressFn;
-pub use search::{SearchHit, SearchQuery, SearchRequest};
+pub use search::{MatchLocation, SearchHit, SearchQuery, SearchRequest};
 pub use session::Session;
 pub use streams::{FlowQuery, FlowSort};
 pub use tables::{ConversationQuery, ConversationSort, HostQuery, HostSort};
@@ -114,13 +114,14 @@ impl Engine {
             let guard_session = session.clone();
             let guard_progress = on_progress.clone();
             let run = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| indexer::run(session, reader, on_progress)));
-            if run.is_err() {
+            if let Err(payload) = run {
                 // Never leave the UI waiting on an indexer that died, nor a
                 // recorder filling a file nobody indexes.
                 guard_session.cancel();
                 let mut p = guard_session.progress();
                 p.state = nettrace_model::IndexState::Failed;
-                p.error = Some("internal: indexer stopped unexpectedly".to_owned());
+                p.error = Some(live::panic_text("indexer", payload.as_ref()));
+                p.error_code = Some("internal".to_owned());
                 guard_session.set_progress(p.clone());
                 guard_progress(p);
             }
@@ -152,10 +153,10 @@ impl Engine {
     /// Starts recording and indexing packets from any live source (also used by tests).
     pub fn start_capture_with(&self, source: Box<dyn LiveSource>, interface: &str, on_progress: ProgressFn) -> Result<CaptureInfo> {
         let id = self.next_id.fetch_add(1, Ordering::SeqCst) + 1;
-        std::fs::create_dir_all(live::temp_dir())?;
-        let path = live::new_temp_path();
-        let writer = live::create_file(&path, source.as_ref())?;
+        let (file, path) = live::create_temp_file()?;
+        // From here on the file is removed whatever fails next.
         let temp = live::TempFile(path.clone());
+        let writer = live::create_file(file, source.as_ref())?;
         let handle = live::LiveHandle::new(interface);
         let tail = live::TailReader::new(std::fs::File::open(&path)?, handle.done.clone());
         let reader = CaptureReader::from_reader(std::io::BufReader::with_capacity(64 * 1024, tail))?;

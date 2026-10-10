@@ -1,23 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { PacketField } from "../../api/types";
-import { fieldLabel, t } from "../../i18n";
+import { fieldLabel, t, type MessageKey } from "../../i18n";
 import { allExpansionKeys, ancestorKeys, flatten, type FlatNode } from "../../lib/tree";
 import { copy, filterByTerm, openStream } from "../../state/actions";
 import { useStore } from "../../state/store";
 import { showContextMenu, type MenuEntry } from "../common/ContextMenu";
 import { Icon } from "../common/Icon";
 
-/** Russian rendering of the Frame heading; other headings keep protocol wording. */
-function frameHeading(name: string): string {
-  const m = /^Frame (\d+): (\d+) bytes on wire \((\d+) bits\), (\d+) bytes captured \((\d+) bits\)(?: on interface (\d+))?/.exec(name);
-  if (!m) return name;
-  return `Кадр ${m[1]}: ${m[2]} байт в канале (${m[3]} бит), захвачено ${m[4]} байт (${m[5]} бит)${m[6] ? `, интерфейс ${m[6]}` : ""}`;
-}
-
+/** Label of a tree node: translated generated labels, localized field names, else the dissector's text. */
 export function nodeLabel(n: PacketField): string {
   let text: string;
-  if (n.field === "frame") text = frameHeading(n.name);
+  const key = n.labelKey ? (`tree.${n.labelKey}` as MessageKey) : null;
+  const translated = key ? t(key, n.labelArgs) : "";
+  if (key && translated !== key) text = translated;
   else if (n.display) text = `${fieldLabel(n.field, n.name)}: ${n.display}`;
   else text = n.name || n.field;
   if (n.generated && !text.startsWith("[")) text = `[${text}]`;
@@ -56,7 +52,13 @@ export function PacketDetails() {
   // Scroll a newly selected node into view once it is rendered; expanding or
   // collapsing other nodes afterwards must not yank the scroll position.
   const scrolledKey = useRef<string | null>(null);
+  const scrolledTree = useRef(tree);
   useEffect(() => {
+    // Paths repeat across packets: a new packet scrolls again.
+    if (scrolledTree.current !== tree) {
+      scrolledTree.current = tree;
+      scrolledKey.current = null;
+    }
     // Paths repeat across packets: a cleared selection must allow the same path again.
     if (!selectedKey) scrolledKey.current = null;
     if (!selectedKey || selectedKey === scrolledKey.current || !ref.current) return;

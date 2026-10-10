@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildFilter, combineFilters, conditionToFilter } from "./filterBuilder";
+import { buildFilter, combineFilters, conditionToFilter, withField } from "./filterBuilder";
 
 describe("conditionToFilter", () => {
   it("maps fields to display filter syntax", () => {
@@ -40,5 +40,30 @@ describe("combineFilters", () => {
     expect(combineFilters("tcp", "udp", "or")).toBe("tcp || udp");
     expect(combineFilters("tcp", "tcp.port == 22", "not")).toBe("tcp && !(tcp.port == 22)");
     expect(combineFilters("tcp", "udp", "replace")).toBe("udp");
+  });
+});
+
+describe("withField", () => {
+  const c = (field: Parameters<typeof withField>[1], value: string, op: "eq" | "present" | "contains" = "eq") =>
+    ({ field, op, value, join: "and" }) as const;
+
+  it("keeps the value only between fields of the same kind", () => {
+    expect(withField(c("src", "10.0.0.1"), "dst").value).toBe("10.0.0.1");
+    expect(withField(c("port", "443"), "dstport").value).toBe("443");
+    expect(withField(c("host", "a.example", "contains"), "sni")).toMatchObject({ value: "a.example", op: "contains" });
+    expect(withField(c("protocol", "tcp", "present"), "src")).toMatchObject({ value: "", op: "eq" });
+    expect(withField(c("src", "10.0.0.1"), "port").value).toBe("");
+  });
+
+  it("starts protocol and flag conditions with a valid choice", () => {
+    expect(withField(c("src", "10.0.0.1"), "protocol")).toMatchObject({ value: "tcp", op: "present" });
+    expect(withField(c("port", "80"), "flags")).toMatchObject({ value: "syn", op: "present" });
+  });
+});
+
+describe("stream fields", () => {
+  it("names the transport of the stream", () => {
+    expect(conditionToFilter({ field: "stream", op: "eq", value: "3", join: "and" })).toBe("tcp.stream == 3");
+    expect(conditionToFilter({ field: "udpstream", op: "eq", value: "3", join: "and" })).toBe("udp.stream == 3");
   });
 });

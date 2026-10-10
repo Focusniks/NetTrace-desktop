@@ -13,6 +13,9 @@ export type Severity = "note" | "warning" | "error";
 export interface PacketField {
   field: string;
   name: string;
+  /** Translatable key of a generated label (`tree.<key>` in the dictionary). */
+  labelKey?: string;
+  labelArgs?: Record<string, string>;
   display: string;
   start: number;
   len: number;
@@ -142,7 +145,7 @@ export interface HostPage {
   rows: HostRow[];
 }
 
-export type ConversationSort = "a" | "b" | "packets" | "bytes" | "ab" | "ba" | "start" | "duration" | "state";
+export type ConversationSort = "a" | "b" | "packets" | "bytes" | "ab" | "ba" | "start" | "end" | "duration" | "state";
 
 export interface ConversationQuery {
   kind: ConversationKind;
@@ -212,6 +215,7 @@ export interface ConversationRow {
   bToAPackets: number;
   bToABytes: number;
   start: number;
+  end: number;
   duration: number;
   state: TcpState | null;
   stream: StreamRef | null;
@@ -324,6 +328,7 @@ export interface IndexProgress {
   elapsedMs: number;
   warning: string | null;
   error: string | null;
+  errorCode: string | null;
   capture: LiveStats | null;
 }
 
@@ -418,10 +423,19 @@ export type SearchQuery =
   | { kind: "text"; text: string; caseSensitive: boolean }
   | { kind: "hex"; text: string };
 
+/** What a search matched inside the packet: a details-tree field and/or a byte range. */
+export interface MatchLocation {
+  /** Index path into `PacketDetail.tree`. */
+  path?: number[];
+  start: number;
+  len: number;
+}
+
 export interface SearchHit {
   row: number;
   number: number;
   wrapped: boolean;
+  location?: MatchLocation;
 }
 
 /** TCP analysis bit flags (crates/model `tcp_analysis`). */

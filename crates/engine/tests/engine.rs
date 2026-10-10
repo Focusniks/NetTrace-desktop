@@ -227,6 +227,15 @@ fn statistics() {
     assert!(conv(ConversationKind::Ip, 0, 10).total > 0);
     assert!(conv(ConversationKind::Eth, 0, 10).total > 0);
     assert_eq!(conv(ConversationKind::Udp, 0, 10).total, e.summary().unwrap().udp_streams);
+    // End = start + duration, and sorting by it works.
+    for kind in [ConversationKind::Eth, ConversationKind::Ip, ConversationKind::Tcp, ConversationKind::Udp] {
+        for r in conv(kind, 0, 1000).rows {
+            assert!((r.end - (r.start + r.duration)).abs() < 1e-6, "{kind:?}: {} != {} + {}", r.end, r.start, r.duration);
+        }
+        let q = ConversationQuery { kind, sort: ConversationSort::End, desc: true, offset: 0, limit: 1000, search: None };
+        let rows = e.conversations_page(&q).unwrap().rows;
+        assert!(rows.windows(2).all(|w| w[0].end >= w[1].end));
+    }
 
     let h = e.protocol_hierarchy().unwrap();
     assert_eq!(h[0].filter, "frame");
@@ -290,6 +299,43 @@ fn technical_indicators_report_facts() {
     for i in &ind {
         assert!(count(&e, &i.filter) > 0, "indicator filter selects nothing: {}", i.filter);
     }
+}
+
+/// The detail tree node at a search hit's path.
+fn node_at<'a>(tree: &'a [nettrace_model::PacketField], path: &[u32]) -> &'a nettrace_model::PacketField {
+    let (first, rest) = path.split_first().expect("non-empty path");
+    let node = &tree[*first as usize];
+    if rest.is_empty() { node } else { node_at(&node.children, rest) }
+}
+
+#[test]
+fn search_hits_point_at_the_matching_field_and_bytes() {
+    let (_f, e) = demo();
+    let find = |query| e.search(&SearchRequest { view_id: 0, from_row: None, backwards: false, query }).unwrap().unwrap();
+
+    // Bytes: the exact range, found in the packet bytes.
+    let hit = find(SearchQuery::Hex { text: "16 03 01".into() });
+    let loc = hit.location.clone().expect("location");
+    let bytes = e.packet_detail(hit.number).unwrap().bytes;
+    assert_eq!(&bytes[loc.start as usize..(loc.start + loc.len) as usize], &[0x16, 0x03, 0x01]);
+
+    // Decoded text: the DNS name field.
+    let hit = find(SearchQuery::Text { text: "API.EXAMPLE.COM".into(), case_sensitive: false });
+    let path = hit.location.unwrap().path.expect("path to a field");
+    let tree = e.packet_detail(hit.number).unwrap().tree;
+    assert_eq!(node_at(&tree, &path).field, "dns.qry.name");
+
+    // Filters: the field that satisfies the condition, or the protocol.
+    for (filter, fields) in [("tcp.port == 443", &["tcp.srcport", "tcp.dstport"][..]), ("dns", &["dns"][..]), ("ip.addr == 10.10.0.53", &["ip.src", "ip.dst"][..])] {
+        let hit = find(SearchQuery::Filter { text: filter.into() });
+        let loc = hit.location.unwrap_or_else(|| panic!("{filter}: no location"));
+        let tree = e.packet_detail(hit.number).unwrap().tree;
+        let node = node_at(&tree, &loc.path.unwrap());
+        assert!(fields.contains(&node.field.as_str()), "{filter}: {}", node.field);
+        assert_eq!((loc.start, loc.len), (node.start, node.len));
+    }
+    // Only negations: the packet is found, but no field can be pointed at.
+    assert!(find(SearchQuery::Filter { text: "!tcp".into() }).location.is_none());
 }
 
 #[test]

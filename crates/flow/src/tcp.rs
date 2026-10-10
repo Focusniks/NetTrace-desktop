@@ -68,6 +68,16 @@ pub struct SegmentAnalysis {
     pub rtt: Option<RttSample>,
 }
 
+/// How much in-progress analysis state a flow holds (see [`TcpFlow::evict_idle`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LiveState {
+    /// Nothing: finished, never established, or the capture is over.
+    None,
+    /// Sequence state only (segment history dropped after a long idle time).
+    Compact,
+    Full,
+}
+
 /// "No packet" in the packet-index fields below (indices stay below it).
 const NO_PACKET: u32 = u32::MAX;
 const NO_TIME: i64 = i64::MIN;
@@ -89,6 +99,8 @@ pub struct TcpFlow {
     fin: [u32; 2],
     first_rst: u32,
     refused: bool,
+    /// Listed in `FlowTable::active_tcp`.
+    active: bool,
     irtt_ns: i64,
     /// Valid when `rtt_count > 0`.
     rtt_min_ns: i64,
@@ -118,6 +130,7 @@ impl Default for TcpFlow {
             fin: [NO_PACKET; 2],
             first_rst: NO_PACKET,
             refused: false,
+            active: false,
             irtt_ns: NO_TIME,
             rtt_min_ns: 0,
             rtt_max_ns: 0,
@@ -221,6 +234,41 @@ impl TcpFlow {
     /// flow were picked up mid-stream.
     pub(crate) fn finish(&mut self) {
         self.live = None;
+    }
+
+    /// Frees state of a flow idle for a long time (live captures run for
+    /// hours). Finished or never-established connections (`has_data` false)
+    /// give back everything; established ones keep their sequence state, so a
+    /// later keep-alive, retransmission or loss is still recognised (only an
+    /// RTT sample for an ACK arriving after the idle time is lost).
+    pub(crate) fn evict_idle(&mut self, has_data: bool) {
+        let established = self.handshake_ack != NO_PACKET || has_data;
+        if self.is_finished() || !established {
+            self.live = None;
+        } else if let Some(live) = self.live.as_mut() {
+            for d in &mut live.dirs {
+                d.recent = Ring::Empty;
+                d.outstanding = Ring::Empty;
+            }
+        }
+    }
+
+    /// Marks the flow as a candidate of the next idle sweep; true if it was not yet.
+    pub(crate) fn mark_active(&mut self) -> bool {
+        !std::mem::replace(&mut self.active, true)
+    }
+
+    pub(crate) fn swept(&mut self) {
+        self.active = false;
+    }
+
+    #[doc(hidden)]
+    pub fn live_state(&self) -> LiveState {
+        match &self.live {
+            None => LiveState::None,
+            Some(l) if l.dirs.iter().all(|d| d.recent.len() == 0 && d.outstanding.len() == 0) => LiveState::Compact,
+            Some(_) => LiveState::Full,
+        }
     }
 
     pub(crate) fn analyse(&mut self, index: u32, ts_ns: i64, dir: Dir, seg: &TcpSegment) -> SegmentAnalysis {

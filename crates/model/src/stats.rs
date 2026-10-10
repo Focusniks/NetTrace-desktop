@@ -55,7 +55,9 @@ pub struct ConversationRow {
     pub a_to_b_bytes: u64,
     pub b_to_a_packets: u64,
     pub b_to_a_bytes: u64,
+    /// First and last packet, seconds relative to the first packet of the capture.
     pub start: f64,
+    pub end: f64,
     pub duration: f64,
     /// TCP state code (see `TcpState`) for TCP conversations.
     pub state: Option<String>,

@@ -140,19 +140,30 @@ export function signatureComment(wrapped) {
 export function checkManifest(manifest, sigText, pubkey, version, repoUrl) {
   const errors = [];
   if (manifest.version !== version) errors.push(`latest.json version is ${manifest.version}, expected ${version}`);
-  const win = manifest.platforms?.["windows-x86_64"];
-  if (!win) {
+  const entries = Object.entries(manifest.platforms ?? {}).filter(([k]) => k.startsWith("windows-x86_64"));
+  if (!entries.some(([k]) => k === "windows-x86_64")) {
     errors.push("latest.json has no windows-x86_64 platform");
     return errors;
   }
   const prefix = `${repoUrl}/releases/download/v${version}/`;
-  if (typeof win.url !== "string" || !win.url.startsWith(prefix)) errors.push(`installer URL ${win.url} is not under ${prefix}`);
-  if (String(win.signature).trim() !== String(sigText).trim()) errors.push("latest.json signature differs from the uploaded .sig");
-  try {
-    if (minisignKeyId(win.signature) !== minisignKeyId(pubkey)) errors.push("the package is signed with a key the app does not trust (pubkey mismatch)");
-  } catch (e) {
-    errors.push(e.message);
+  for (const [key, win] of entries) {
+    if (typeof win.url !== "string" || !win.url.startsWith(prefix)) errors.push(`${key}: installer URL ${win.url} is not under ${prefix}`);
+    if (String(win.signature).trim() !== String(sigText).trim()) errors.push(`${key}: latest.json signature differs from the uploaded .sig`);
+    try {
+      if (minisignKeyId(win.signature) !== minisignKeyId(pubkey)) errors.push(`${key}: the package is signed with a key the app does not trust (pubkey mismatch)`);
+    } catch (e) {
+      errors.push(`${key}: ${e.message}`);
+    }
+    if (!signatureComment(win.signature).split("\t").includes(`version:${version}`)) errors.push(`${key}: the signature does not bind version ${version}`);
   }
-  if (!signatureComment(win.signature).split("\t").includes(`version:${version}`)) errors.push(`the signature does not bind version ${version}`);
   return errors;
+}
+
+/**
+ * latest.json for the updater: on Windows the NSIS installer is the update
+ * package (the same entry under the generic and the installer-specific key).
+ */
+export function buildManifest({ version, notes, pubDate, url, signature }) {
+  const entry = { signature: String(signature).trim(), url };
+  return { version, notes, pub_date: pubDate, platforms: { "windows-x86_64": entry, "windows-x86_64-nsis": { ...entry } } };
 }

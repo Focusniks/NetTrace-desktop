@@ -112,10 +112,15 @@ export async function checkForUpdates(manual: boolean): Promise<void> {
   }
 }
 
+function remember(error: string | null) {
+  useStore.getState().updateSettings({ lastUpdateCheck: { at: new Date().toISOString(), ok: error == null, error } });
+}
+
 async function runCheck(): Promise<void> {
   try {
     const { check } = await import("@tauri-apps/plugin-updater");
     const update = await check({ timeout: 30_000 });
+    remember(null);
     // A manual check may have joined while this one was running.
     const manual = useUpdate.getState().manual;
     if (!update) {
@@ -146,8 +151,9 @@ async function runCheck(): Promise<void> {
     if (!manual && isCapturing()) useStore.getState().flash(flash);
     else showDialog(flash);
   } catch (e) {
+    const message = errorText(e);
+    remember(message);
     if (useUpdate.getState().manual) {
-      const message = errorText(e);
       useUpdate.setState({ status: "error", error: message });
       report(t("update.error", { message }));
     } else {

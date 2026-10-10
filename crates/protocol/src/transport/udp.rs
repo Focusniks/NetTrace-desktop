@@ -3,6 +3,7 @@ use nettrace_model::{FieldValue, ProtocolId, Transport};
 use crate::context::{m, Ctx, Malformed, TransportInfo};
 use crate::fields as f;
 use crate::format;
+use crate::labels;
 use crate::registry::{Dissector, Handoff, Layer};
 
 pub struct Udp;
@@ -50,7 +51,13 @@ impl Dissector for Udp {
         t.close();
         if payload_len > 0 {
             if t.full() {
-                t.text(|| format!("UDP payload ({})", format::plural_bytes(payload_len)), start + 8, payload_len);
+                t.text_key(
+                    labels::UDP_PAYLOAD,
+                    || vec![("bytes", payload_len.to_string())],
+                    || format!("UDP payload ({})", format::plural_bytes(payload_len)),
+                    start + 8,
+                    payload_len,
+                );
             } else {
                 let payload = layer.frame.get(start + 8..end).unwrap_or(&[]);
                 t.bytes(&f::UDP_PAYLOAD, start + 8, payload);

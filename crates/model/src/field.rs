@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use serde::Serialize;
 
 /// Typed value of a dissected field. Used by the protocol tree and the
@@ -63,6 +65,12 @@ pub struct PacketField {
     pub field: String,
     /// Default (English) label; the UI may localize by `field`.
     pub name: String,
+    /// Language-independent key of a generated label (the UI translates
+    /// `tree.<key>` with `label_args`; `name` is the English fallback).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label_key: Option<String>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub label_args: BTreeMap<String, String>,
     /// Formatted value; empty for protocol headings that carry a summary in `name`.
     pub display: String,
     /// Absolute byte offset inside the frame.

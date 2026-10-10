@@ -75,6 +75,25 @@ impl Filter {
         let mut buf = Vec::with_capacity(4);
         eval(&self.expr, src, &mut buf)
     }
+
+    /// True when field `id` with value `v` satisfies a positive condition of
+    /// the filter: it is (part of) why a packet matches. Used to point at the
+    /// matching field of a search hit. Conditions under `!` and `!=` never
+    /// point at a field.
+    pub fn witness(&self, id: u32, v: &FieldValue) -> bool {
+        witness(&self.expr, id, v, false)
+    }
+}
+
+fn witness(e: &Expr, id: u32, v: &FieldValue, negated: bool) -> bool {
+    match e {
+        Expr::Or(terms) | Expr::And(terms) => terms.iter().any(|a| witness(a, id, v, negated)),
+        Expr::Not(a) => witness(a, id, v, !negated),
+        _ if negated => false,
+        Expr::Exists(ids) => ids.contains(&id),
+        Expr::Cmp { ids, op, value } => *op != CmpOp::Ne && ids.contains(&id) && compare(v, *op, value),
+        Expr::In { ids, values } => ids.contains(&id) && values.iter().any(|x| compare(v, CmpOp::Eq, x)),
+    }
 }
 
 fn err(code: ErrorCode, span: Span, detail: &str) -> QueryError {

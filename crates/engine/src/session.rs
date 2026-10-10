@@ -87,6 +87,7 @@ impl Session {
                 elapsed_ms: 0,
                 warning: None,
                 error: None,
+                error_code: None,
                 capture: live.as_ref().map(|l| l.stats.lock().clone()),
             }),
             progress_changed: Condvar::new(),

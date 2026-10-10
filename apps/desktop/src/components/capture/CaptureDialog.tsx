@@ -33,7 +33,7 @@ export function CaptureDialog({ onClose, initial }: { onClose: () => void; initi
       // guardUnsaved may have replaced this dialog with the "save packets?" question.
       if (useStore.getState().dialog === "capture") onClose();
     } catch (e) {
-      setError((e as Error).message);
+      setError(errorText(e));
     } finally {
       setBusy(false);
     }

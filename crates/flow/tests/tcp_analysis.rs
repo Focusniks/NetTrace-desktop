@@ -8,7 +8,16 @@ use nettrace_testkit::{udp_frame, Capture, TcpConv};
 
 /// Runs a capture through dissection + flow tracking like the engine does.
 fn run(cap: &Capture) -> (FlowTable, Vec<Option<FlowAssignment>>) {
+    run_evicting(cap, None)
+}
+
+/// Like [`run`], freeing the state of flows idle for `idle_ns` after every
+/// packet (as a live capture does periodically).
+fn run_evicting(cap: &Capture, idle_ns: Option<i64>) -> (FlowTable, Vec<Option<FlowAssignment>>) {
     let mut table = FlowTable::new();
+    if idle_ns.is_some() {
+        table.track_idle();
+    }
     let mut out = Vec::new();
     for (i, (ts, frame)) in cap.frames.iter().enumerate() {
         let fctx = FrameContext { link_type: Some(LinkType::Ethernet), ..FrameContext::default() };
@@ -40,6 +49,9 @@ fn run(cap: &Capture) -> (FlowTable, Vec<Option<FlowAssignment>>) {
             app: s.top.filter(|p| !matches!(p, nettrace_model::ProtocolId::Tcp | nettrace_model::ProtocolId::Udp)),
         };
         out.push(Some(table.process(&p)));
+        if let Some(idle) = idle_ns {
+            table.evict_idle(ts.nanos(), idle);
+        }
     }
     (table, out)
 }
@@ -240,4 +252,59 @@ fn flow_results_stay_small() {
     // Millions of flows are kept for the whole capture: guard their size.
     assert!(std::mem::size_of::<nettrace_flow::Flow>() <= 128, "{}", std::mem::size_of::<nettrace_flow::Flow>());
     assert!(std::mem::size_of::<nettrace_flow::TcpFlow>() <= 136, "{}", std::mem::size_of::<nettrace_flow::TcpFlow>());
+}
+
+const IDLE: i64 = 300_000_000_000; // 5 minutes
+const MINUTE_US: i64 = 60_000_000;
+
+/// Capture-time ticks from an unrelated host (advances the capture clock).
+fn tick(cap: &mut Capture, n: u16) {
+    cap.push_after_us(MINUTE_US, udp_frame(OTHER, 40_000 + n, SERVER, 53, &build::dns_query(n, "tick.example", 1)));
+}
+
+#[test]
+fn freeing_idle_state_changes_nothing_on_normal_traffic() {
+    for cap in [scenarios::demo(), scenarios::large(40), scenarios::tcp_problems()] {
+        let (plain, a) = run(&cap);
+        let (evicted, b) = run_evicting(&cap, Some(IDLE));
+        assert_eq!(a, b);
+        let summary = |t: &FlowTable| t.flows().iter().map(|f| format!("{:?}", f.summary(0))).collect::<Vec<_>>();
+        assert_eq!(summary(&plain), summary(&evicted));
+        assert!((0..cap.frames.len() as u32).all(|i| plain.rtt_for(i) == evicted.rtt_for(i)));
+    }
+}
+
+#[test]
+fn idle_flows_give_back_their_analysis_state() {
+    use nettrace_flow::LiveState;
+    let mut cap = Capture::ethernet();
+    // A SYN that is never answered, and a finished connection.
+    let mut lone = TcpConv::new(CLIENT, 50_001, SERVER, 443);
+    let syn = lone.segment(true, tcpf::SYN, lone.cseq, 0, &[], vec![]);
+    cap.push_after_us(10, syn);
+    let mut done = TcpConv::new(CLIENT, 50_002, SERVER, 80);
+    done.handshake(&mut cap, 100);
+    done.close(&mut cap, true, 100);
+    // An established connection that goes quiet.
+    let mut quiet = TcpConv::new(CLIENT, 50_003, SERVER, 22);
+    quiet.handshake(&mut cap, 100);
+    let old = quiet.send(&mut cap, true, b"hello", 100);
+    quiet.ack(&mut cap, false, 100);
+    for n in 0..10 {
+        tick(&mut cap, n);
+    }
+    let (table, _) = run_evicting(&cap, Some(IDLE));
+    let state = |id| table.stream(Transport::Tcp, id).unwrap().1.tcp.as_deref().unwrap().live_state();
+    assert_eq!(state(0), LiveState::None);
+    assert_eq!(state(1), LiveState::None);
+    assert_eq!(state(2), LiveState::Compact);
+
+    // The quiet connection still recognises keep-alives and retransmissions.
+    let seq = quiet.cseq.wrapping_sub(1);
+    quiet.send_at(&mut cap, true, seq, &[0], 100);
+    quiet.send_at(&mut cap, true, old, b"hello", 100);
+    let (_, a) = run_evicting(&cap, Some(IDLE));
+    let n = cap.frames.len();
+    assert_ne!(flags(&a, n - 1) & ta::KEEP_ALIVE, 0, "keep-alive after idle");
+    assert_ne!(flags(&a, n) & ta::RETRANSMISSION, 0, "retransmission after idle");
 }

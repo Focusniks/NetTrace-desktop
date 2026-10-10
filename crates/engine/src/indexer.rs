@@ -25,6 +25,10 @@ const PROGRESS_EVERY: Duration = Duration::from_millis(100);
 const MAX_PACKETS: u32 = u32::MAX - 1;
 /// New flows beyond this are not tracked (packets stay in the list without a stream).
 const MAX_FLOWS: usize = 8_000_000;
+/// Live captures: a TCP connection without packets this long gives back its
+/// analysis state (longer than SYN retries and TIME_WAIT).
+const IDLE_NS: i64 = 5 * 60 * 1_000_000_000;
+const SWEEP_EVERY_NS: i64 = 30 * 1_000_000_000;
 
 struct Pending {
     rec: RecordMeta,
@@ -128,9 +132,27 @@ pub(crate) fn apply(sh: &mut Shared, rec: &RecordMeta, s: &Summary) {
     });
 }
 
-fn snapshot(session: &Session, state: IndexState, bytes_read: u64, warning: Option<String>, error: Option<String>) -> IndexProgress {
+/// Code of a live-capture error message (see `live::record`).
+fn live_error_code(message: &str) -> &'static str {
+    if message.starts_with("write:") {
+        "io"
+    } else if message.starts_with("internal:") {
+        "internal"
+    } else {
+        "capture_read"
+    }
+}
+
+fn snapshot(
+    session: &Session,
+    state: IndexState,
+    bytes_read: u64,
+    warning: Option<String>,
+    error: Option<(&'static str, String)>,
+) -> IndexProgress {
     let sh = session.data.read();
     let live = session.live.as_ref();
+    let live_error = live.and_then(|l| l.error.lock().clone());
     IndexProgress {
         capture_id: session.id,
         state,
@@ -142,7 +164,8 @@ fn snapshot(session: &Session, state: IndexState, bytes_read: u64, warning: Opti
         total_bytes: if live.is_some() { bytes_read } else { session.file.size() },
         elapsed_ms: session.started.elapsed().as_millis() as u64,
         warning,
-        error: error.or_else(|| live.and_then(|l| l.error.lock().clone())),
+        error_code: error.as_ref().map(|(c, _)| (*c).to_owned()).or_else(|| live_error.as_deref().map(|m| live_error_code(m).to_owned())),
+        error: error.map(|(_, m)| m).or(live_error),
         capture: live.map(|l| l.stats.lock().clone()),
     }
 }
@@ -156,7 +179,11 @@ pub(crate) fn run<S: PacketSource>(session: Arc<Session>, mut reader: S, on_prog
     let mut count: u32 = 0;
     let mut link_types_seen = 0usize;
 
-    let flush = |pending: &mut Vec<Pending>, reader: &S, link_types_seen: &mut usize| {
+    if live {
+        session.data.write().flows.track_idle();
+    }
+    let mut last_sweep_ns = i64::MIN;
+    let flush = |pending: &mut Vec<Pending>, reader: &S, link_types_seen: &mut usize, last_sweep_ns: &mut i64| {
         let mut sh = session.data.write();
         let ifaces = reader.interfaces();
         if ifaces.len() != *link_types_seen {
@@ -174,6 +201,17 @@ pub(crate) fn run<S: PacketSource>(session: Arc<Session>, mut reader: S, on_prog
         sh.index.reserve(pending.len());
         for p in pending.drain(..) {
             apply(&mut sh, &p.rec, &p.summary);
+        }
+        // A live capture can run for hours: free the analysis state of
+        // connections idle for long (capture time, not wall-clock time).
+        if live {
+            let now = sh.index.len().checked_sub(1).and_then(|i| sh.index.get(i)).map_or(0, |m| m.ts_ns);
+            if *last_sweep_ns == i64::MIN {
+                *last_sweep_ns = now;
+            } else if now.saturating_sub(*last_sweep_ns) >= SWEEP_EVERY_NS {
+                sh.flows.evict_idle(now, IDLE_NS);
+                *last_sweep_ns = now;
+            }
         }
     };
 
@@ -201,17 +239,17 @@ pub(crate) fn run<S: PacketSource>(session: Arc<Session>, mut reader: S, on_prog
                 count += 1;
                 // Live: every packet becomes visible immediately (the source may go quiet).
                 if live || pending.len() >= BATCH || last_flush.elapsed() >= FLUSH_EVERY {
-                    flush(&mut pending, &reader, &mut link_types_seen);
+                    flush(&mut pending, &reader, &mut link_types_seen, &mut last_sweep_ns);
                     last_flush = Instant::now();
                 }
             }
             Ok(None) => break (IndexState::Done, None, None),
             Err(CaptureError::Truncated { .. }) => break (IndexState::Done, Some("truncated".to_owned()), None),
-            Err(e) => break (IndexState::Failed, None, Some(format!("{}: {e}", e.code()))),
+            Err(e) => break (IndexState::Failed, None, Some((e.code(), format!("{}: {e}", e.code())))),
         }
         if last_progress.elapsed() >= PROGRESS_EVERY {
             if !pending.is_empty() {
-                flush(&mut pending, &reader, &mut link_types_seen);
+                flush(&mut pending, &reader, &mut link_types_seen, &mut last_sweep_ns);
                 last_flush = Instant::now();
             }
             let p = snapshot(&session, IndexState::Indexing, reader.bytes_consumed(), None, None);
@@ -220,7 +258,7 @@ pub(crate) fn run<S: PacketSource>(session: Arc<Session>, mut reader: S, on_prog
             last_progress = Instant::now();
         }
     };
-    flush(&mut pending, &reader, &mut link_types_seen);
+    flush(&mut pending, &reader, &mut link_types_seen, &mut last_sweep_ns);
     {
         // No more packets: per-connection analysis state and spare capacity go.
         let mut sh = session.data.write();

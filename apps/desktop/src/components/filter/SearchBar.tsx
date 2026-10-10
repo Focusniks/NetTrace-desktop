@@ -78,7 +78,7 @@ export function SearchBar() {
       if (!hit) setNote(t("search.notFound"));
       else {
         if (hit.wrapped) setNote(t("search.wrapped"));
-        await s.selectPacket(hit.number);
+        await s.selectPacket(hit.number, { match: hit.location });
       }
     } catch (e) {
       setNote(e instanceof BackendError && e.filter ? filterErrorText(e.filter) : errorText(e));

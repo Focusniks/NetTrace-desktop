@@ -19,11 +19,16 @@ pub enum TreeMode {
     Full,
 }
 
+/// Arguments of a translatable label (`{name}` placeholders of `tree.<key>`).
+pub type LabelArgs = Vec<(&'static str, String)>;
+
 #[derive(Debug, Clone)]
 pub struct Node {
     pub field: Option<&'static Field>,
     /// Overrides the field name (protocol headings carry a summary here).
     pub label: Option<String>,
+    /// Translatable form of `label` (see [`crate::labels`]).
+    pub key: Option<(&'static str, LabelArgs)>,
     pub display: String,
     pub value: FieldValue,
     pub start: usize,
@@ -38,6 +43,7 @@ impl Node {
         Node {
             field,
             label: None,
+            key: None,
             display: String::new(),
             value: FieldValue::None,
             start,
@@ -138,6 +144,26 @@ impl Tree {
         }
     }
 
+    /// Like [`Tree::heading`], with a translatable key.
+    pub fn heading_key(&mut self, key: &'static str, args: impl FnOnce() -> LabelArgs, label: impl FnOnce() -> String) {
+        if self.mode == TreeMode::Full {
+            if let Some(top) = self.stack.last_mut() {
+                top.label = Some(label());
+                top.key = Some((key, args()));
+            }
+        }
+    }
+
+    /// Like [`Tree::open_text`], with a translatable key.
+    pub fn open_text_key(&mut self, key: &'static str, label: impl FnOnce() -> String, start: usize, len: usize) {
+        if self.mode == TreeMode::Full {
+            let mut node = Node::new(None, start, len);
+            node.label = Some(label());
+            node.key = Some((key, Vec::new()));
+            self.stack.push(node);
+        }
+    }
+
     pub fn set_len(&mut self, len: usize) {
         if let Some(top) = self.stack.last_mut() {
             top.len = len;
@@ -227,6 +253,34 @@ impl Tree {
         }
     }
 
+    /// A text node the UI translates by `key` (`label` is the English fallback).
+    pub fn text_key(&mut self, key: &'static str, args: impl FnOnce() -> LabelArgs, label: impl FnOnce() -> String, start: usize, len: usize) {
+        if self.mode == TreeMode::Full {
+            let mut node = Node::new(None, start, len);
+            node.label = Some(label());
+            node.key = Some((key, args()));
+            self.attach(node);
+        }
+    }
+
+    /// Like [`Tree::expert`], with a translatable key.
+    pub fn expert_key(
+        &mut self,
+        field: &'static Field,
+        severity: Severity,
+        key: &'static str,
+        args: impl FnOnce() -> LabelArgs,
+        label: impl FnOnce() -> String,
+    ) {
+        self.expert(field, severity, label);
+        if self.mode == TreeMode::Full {
+            let parent = self.stack.last_mut().map(|p| &mut p.children).unwrap_or(&mut self.roots);
+            if let Some(node) = parent.last_mut() {
+                node.key = Some((key, args()));
+            }
+        }
+    }
+
     pub fn uint(&mut self, field: &'static Field, start: usize, len: usize, v: u64) {
         self.add(field, start, len, FieldValue::U64(v), || v.to_string());
     }
@@ -291,6 +345,12 @@ fn node_to_model(n: &Node) -> PacketField {
     PacketField {
         field: n.field.map(|f| f.abbrev.to_owned()).unwrap_or_default(),
         name: n.name().to_owned(),
+        label_key: n.key.as_ref().map(|(k, _)| (*k).to_owned()),
+        label_args: n
+            .key
+            .as_ref()
+            .map(|(_, args)| args.iter().map(|(k, v)| ((*k).to_owned(), v.clone())).collect())
+            .unwrap_or_default(),
         display: n.display.clone(),
         start: u32::try_from(n.start).unwrap_or(u32::MAX),
         len: u32::try_from(n.len).unwrap_or(0),

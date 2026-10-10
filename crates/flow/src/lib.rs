@@ -13,7 +13,7 @@ mod tcp;
 
 pub use seq::{seq_gt, seq_le, seq_lt};
 pub use table::{Flow, FlowAssignment, FlowKind, FlowPacket, FlowTable, TcpSegment};
-pub use tcp::{RttSample, TcpDirection, TcpFlow};
+pub use tcp::{LiveState, RttSample, TcpDirection, TcpFlow};
 
 /// Packet direction within a flow.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

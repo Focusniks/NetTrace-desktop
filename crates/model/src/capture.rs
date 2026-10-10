@@ -45,6 +45,8 @@ pub struct IndexProgress {
     /// Non-fatal reading problem (e.g. truncated last record), stable code.
     pub warning: Option<String>,
     pub error: Option<String>,
+    /// Stable code of `error` (`corrupt`, `io`, `capture_read`, …) for the UI's own wording.
+    pub error_code: Option<String>,
     /// Live capture statistics (present only while capturing / after a live capture).
     pub capture: Option<LiveStats>,
 }

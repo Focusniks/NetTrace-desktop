@@ -4,12 +4,16 @@
 //   node scripts/release-ci.mjs check v1.0.1         tag must match every version field
 //   node scripts/release-ci.mjs notes v1.0.1 <file>  write the CHANGELOG section to <file>
 //   node scripts/release-ci.mjs manifest v1.0.1 <dir> check latest.json + .sig downloaded to <dir>
+//   node scripts/release-ci.mjs latest v1.0.1 <installer> <notes> <out>
+//                                                     write latest.json for the signed installer (<installer>.sig)
 
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { checkManifest, extractNotes, parseVersion, readCargoVersion } from "./release-lib.mjs";
+import { buildManifest, checkManifest, extractNotes, parseVersion, readCargoVersion } from "./release-lib.mjs";
+
+const REPO = "https://github.com/Focusniks/NetTrace-desktop";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (rel) => readFileSync(join(ROOT, rel), "utf8");
@@ -19,7 +23,7 @@ function fail(message) {
   process.exit(1);
 }
 
-const [command, tag, out] = process.argv.slice(2);
+const [command, tag, out, ...rest] = process.argv.slice(2);
 let version;
 try {
   version = parseVersion(tag);
@@ -49,9 +53,25 @@ if (command === "check") {
   if (sigs.length !== 1) fail(`expected one .sig in ${out}, found ${sigs.length}`);
   const manifest = JSON.parse(readFileSync(join(out, "latest.json"), "utf8"));
   const pubkey = JSON.parse(read("apps/desktop/src-tauri/tauri.conf.json")).plugins.updater.pubkey;
-  const errors = checkManifest(manifest, readFileSync(join(out, sigs[0]), "utf8"), pubkey, version, "https://github.com/Focusniks/NetTrace-desktop");
+  const errors = checkManifest(manifest, readFileSync(join(out, sigs[0]), "utf8"), pubkey, version, REPO);
   if (errors.length) fail(`latest.json is not publishable:\n  ${errors.join("\n  ")}`);
   console.log(`release-ci: latest.json announces ${version}, signed with the trusted key`);
+} else if (command === "latest") {
+  const [notes, target] = rest;
+  if (!out || !notes || !target) fail("usage: release-ci.mjs latest <tag> <installer> <notes> <out>");
+  try {
+    const manifest = buildManifest({
+      version,
+      notes: readFileSync(notes, "utf8").trim(),
+      pubDate: new Date().toISOString(),
+      url: `${REPO}/releases/download/v${version}/${basename(out)}`,
+      signature: readFileSync(`${out}.sig`, "utf8"),
+    });
+    writeFileSync(target, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  } catch (e) {
+    fail(e.message);
+  }
+  console.log(`release-ci: wrote ${target} for ${basename(out)}`);
 } else {
-  fail("usage: release-ci.mjs <check|notes|manifest> <tag> [file|dir]");
+  fail("usage: release-ci.mjs <check|notes|manifest|latest> <tag> [args]");
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { PacketField } from "../api/types";
-import { ancestorKeys, deepestAt, flatten, nodeAt } from "./tree";
+import { ancestorKeys, deepestAt, flatten, nodeAt, resolveMatch } from "./tree";
 
 const f = (field: string, start: number, len: number, children: PacketField[] = []): PacketField => ({
   field,
@@ -44,5 +44,12 @@ describe("tree helpers", () => {
     expect(nodeAt(tree, "2/0/0")?.field).toBe("ip.flags.df");
     expect(nodeAt(tree, "9")).toBeNull();
     expect(ancestorKeys(tree, "2/0/0")).toEqual(["ip", "ip/ip.flags"]);
+  });
+
+  it("resolves a search match to a field or to bytes", () => {
+    expect(resolveMatch(tree, { path: [2, 1], start: 0, len: 0 })).toEqual({ highlight: { start: 26, len: 4 }, key: "2/1" });
+    expect(resolveMatch(tree, { start: 7, len: 2 })).toEqual({ highlight: { start: 7, len: 2 }, key: "1/1" });
+    // A path that does not exist falls back to the bytes.
+    expect(resolveMatch(tree, { path: [9, 9], start: 20, len: 1 })).toEqual({ highlight: { start: 20, len: 1 }, key: "2/0/0" });
   });
 });

@@ -4,6 +4,9 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Weekly dependency audit even without code changes (new advisories).
+  schedule:
+    - cron: "17 5 * * 1"
 
 permissions:
   contents: read
@@ -21,6 +24,8 @@ defaults:
 jobs:
   test:
     name: Tests (Windows)
+    # The weekly run is only the dependency audit.
+    if: github.event_name != 'schedule'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -63,3 +68,24 @@ jobs:
 
       - name: Release script tests
         run: node --test "scripts/*.test.mjs"
+
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe # v2.87.27
+        with:
+          tool: cargo-audit@0.22.2
+
+      # Fails on known vulnerabilities in Cargo.lock. Unmaintained-crate
+      # warnings (the Tauri tree has some) are reported but do not fail.
+      - name: cargo audit
+        run: cargo audit
+
+      - name: npm audit (shipped packages)
+        working-directory: apps/desktop
+        run: npm audit --omit=dev --audit-level=moderate

@@ -126,9 +126,14 @@ describe("checkForUpdates", () => {
     await checkForUpdates(false);
     expect(useUpdate.getState().status).toBe("idle");
     expect(warn).toHaveBeenCalled();
+    // Quiet, but remembered: Help → About shows that updates are not arriving.
+    expect(useStore.getState().settings.lastUpdateCheck).toMatchObject({ ok: false, error: "offline" });
     await checkForUpdates(true);
     expect(useUpdate.getState()).toMatchObject({ status: "error", error: "offline" });
     warn.mockRestore();
+    check.mockResolvedValue(null);
+    await checkForUpdates(false);
+    expect(useStore.getState().settings.lastUpdateCheck).toMatchObject({ ok: true, error: null });
   });
 });
 

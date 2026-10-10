@@ -6,6 +6,7 @@ use nettrace_model::{FieldValue, ProtocolId, TimelineKind, Transport};
 use crate::context::{Ctx, Malformed};
 use crate::fields::{self as f, Field};
 use crate::format;
+use crate::labels;
 use crate::registry::{AppDissector, Layer};
 use crate::transport::tcp::info_prefix;
 
@@ -152,7 +153,13 @@ impl AppDissector for Http {
             }
         }
         if !headers_complete {
-            t.text(|| "[Headers continue in the next segment; reassembly is not supported]".to_owned(), start + pos, 0);
+            t.text_key(
+                labels::HTTP_HEADERS_CONTINUE,
+                Vec::new,
+                || "[Headers continue in the next segment; reassembly is not supported]".to_owned(),
+                start + pos,
+                0,
+            );
         }
         let body = data.get(pos..).unwrap_or(&[]);
         if headers_complete && !body.is_empty() {

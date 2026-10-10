@@ -1,4 +1,4 @@
-import type { PacketField } from "../api/types";
+import type { MatchLocation, PacketField } from "../api/types";
 
 /** Stable expansion key: path of field abbreviations (or labels for text nodes). */
 export function expansionKey(parent: string, node: PacketField): string {
@@ -42,6 +42,21 @@ export function nodeAt(tree: PacketField[], path: string): PacketField | null {
     nodes = node.children;
   }
   return node;
+}
+
+/**
+ * Highlight and tree selection for a search match: the matched field (by its
+ * path) or else the smallest field around the matched bytes.
+ */
+export function resolveMatch(
+  tree: PacketField[],
+  loc: MatchLocation,
+): { highlight: { start: number; len: number } | null; key: string | null } {
+  const key = loc.path?.length ? loc.path.join("/") : null;
+  const node = key ? nodeAt(tree, key) : null;
+  if (node) return { highlight: node.len > 0 ? { start: node.start, len: node.len } : null, key };
+  const bytes = loc.len > 0 ? { start: loc.start, len: loc.len } : null;
+  return { highlight: bytes, key: bytes ? deepestAt(tree, loc.start) : null };
 }
 
 /** Expansion keys of all ancestors of `path` (so the node becomes visible). */

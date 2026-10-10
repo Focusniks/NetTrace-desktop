@@ -52,6 +52,7 @@ pub enum ConversationSort {
     Ab,
     Ba,
     Start,
+    End,
     Duration,
     State,
 }
@@ -205,6 +206,7 @@ pub(crate) fn conversation_order(sh: &Shared, q: &ConversationQuery) -> Vec<u32>
                     ConversationSort::Ab => x.a_to_b_bytes.cmp(&y.a_to_b_bytes),
                     ConversationSort::Ba => x.b_to_a_bytes.cmp(&y.b_to_a_bytes),
                     ConversationSort::Start => x.first_ns.cmp(&y.first_ns),
+                    ConversationSort::End => x.last_ns.cmp(&y.last_ns),
                     ConversationSort::Duration => x.last_ns.saturating_sub(x.first_ns).cmp(&y.last_ns.saturating_sub(y.first_ns)),
                     ConversationSort::State => Ordering::Equal,
                 }
@@ -224,6 +226,7 @@ fn flow_cmp(x: &Flow, y: &Flow, sort: ConversationSort) -> Ordering {
         ConversationSort::Ab => x.c2s.bytes.cmp(&y.c2s.bytes),
         ConversationSort::Ba => x.s2c.bytes.cmp(&y.s2c.bytes),
         ConversationSort::Start => x.first_ts_ns.cmp(&y.first_ts_ns),
+        ConversationSort::End => x.last_ts_ns.cmp(&y.last_ts_ns),
         ConversationSort::Duration => x.duration_ns().cmp(&y.duration_ns()),
         ConversationSort::State => state(x).cmp(&state(y)),
     }
@@ -255,6 +258,7 @@ fn flow_row(kind: ConversationKind, f: &Flow, base: i64) -> ConversationRow {
         b_to_a_packets: u64::from(f.s2c.packets),
         b_to_a_bytes: f.s2c.bytes,
         start: f.first_ts_ns.saturating_sub(base) as f64 / 1e9,
+        end: f.last_ts_ns.saturating_sub(base) as f64 / 1e9,
         duration: f.duration_ns() as f64 / 1e9,
         state: f.tcp.as_deref().map(|t| tcp_state_code(t.state()).to_owned()),
         stream: Some(StreamRef { kind: f.transport, id: f.stream_id }),

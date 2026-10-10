@@ -159,11 +159,23 @@ export async function setWindowTitle(title: string): Promise<void> {
   }
 }
 
-/** Calls `cb` with paths of files dropped onto the window. */
-export async function onFileDrop(cb: (paths: string[]) => void): Promise<() => void> {
+/** Whether a native drag event means "files are over the window" (null: no change). */
+export function dragOverlayState(type: string): boolean | null {
+  if (type === "enter" || type === "over") return true;
+  if (type === "leave" || type === "drop") return false;
+  return null;
+}
+
+/**
+ * Native file drag and drop (Tauri). The WebView gets no HTML5 drag events
+ * for files then, so hover state comes from here too.
+ */
+export async function onFileDrag(cb: { onHover: (active: boolean) => void; onDrop: (paths: string[]) => void }): Promise<() => void> {
   if (!inTauri) return () => {};
   const { getCurrentWebview } = await import("@tauri-apps/api/webview");
   return getCurrentWebview().onDragDropEvent((e) => {
-    if (e.payload.type === "drop") cb(e.payload.paths);
+    const hover = dragOverlayState(e.payload.type);
+    if (hover !== null) cb.onHover(hover);
+    if (e.payload.type === "drop") cb.onDrop(e.payload.paths);
   });
 }

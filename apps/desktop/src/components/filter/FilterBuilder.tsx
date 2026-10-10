@@ -7,6 +7,7 @@ import {
   opsFor,
   PROTOCOLS,
   TCP_FLAGS,
+  withField,
   type BuilderCondition,
   type BuilderField,
 } from "../../lib/filterBuilder";
@@ -34,11 +35,8 @@ export function FilterBuilder({ onClose }: { onClose: () => void }) {
     setConds((cs) =>
       cs.map((c, j) => {
         if (j !== i) return c;
-        const next = { ...c, ...patch };
-        if (patch.field && !opsFor(patch.field).includes(next.op)) next.op = opsFor(patch.field)[0];
-        if (patch.field === "protocol") next.value = next.value && PROTOCOLS.includes(next.value) ? next.value : "tcp";
-        if (patch.field === "flags") next.value = "syn";
-        return next;
+        const changed = patch.field && patch.field !== c.field ? withField(c, patch.field) : c;
+        return { ...changed, ...patch };
       }),
     );
 

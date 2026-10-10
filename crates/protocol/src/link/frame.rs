@@ -5,11 +5,22 @@ use nettrace_model::FieldValue;
 use crate::context::{FrameContext, Summary};
 use crate::fields as f;
 use crate::format;
+use crate::labels;
 use crate::tree::Tree;
 
 pub fn frame_tree(t: &mut Tree, fctx: &FrameContext, summary: &Summary, frame_len: usize) {
     t.open(&f::FRAME, 0, frame_len);
-    t.heading(|| {
+    let args = || {
+        vec![
+            ("number", fctx.number.to_string()),
+            ("wire", fctx.origlen.to_string()),
+            ("wireBits", (u64::from(fctx.origlen) * 8).to_string()),
+            ("captured", fctx.caplen.to_string()),
+            ("capturedBits", (u64::from(fctx.caplen) * 8).to_string()),
+            ("interface", fctx.interface.to_string()),
+        ]
+    };
+    t.heading_key(labels::FRAME, args, || {
         let mut s = format!(
             "Frame {}: {} bytes on wire ({} bits), {} bytes captured ({} bits)",
             fctx.number,

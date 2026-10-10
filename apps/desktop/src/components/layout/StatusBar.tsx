@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 import { t, type MessageKey } from "../../i18n";
 import { fmtBytes, fmtDuration, fmtInt, fmtPercent } from "../../lib/format";
-import { useStore } from "../../state/store";
+import { progressErrorText, useStore } from "../../state/store";
 
 export function StatusBar() {
   const capture = useStore((s) => s.capture);
@@ -75,7 +75,9 @@ export function StatusBar() {
       ) : progress?.state === "done" ? (
         <span className="sb-item">{t("status.indexed", { time: fmtDuration(progress.elapsedMs / 1000) })}</span>
       ) : progress?.state === "failed" ? (
-        <span className="sb-item sb-error">{t("status.failed", { error: progress.error ?? "" })}</span>
+        <span className="sb-item sb-error" title={progress.error ?? undefined}>
+          {t(capture?.live ? "status.captureFailed" : "status.failed", { error: progressErrorText(progress) })}
+        </span>
       ) : null}
       {progress?.warning ? <span className="sb-item sb-warn">{t(`status.warning.${progress.warning}` as MessageKey)}</span> : null}
       <span className="grow" />

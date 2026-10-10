@@ -40,7 +40,7 @@ pub const PROGRESS_EVENT: &str = "index-progress";
 pub async fn open_capture(app: AppHandle, state: State<'_, AppState>, path: String) -> CmdResult<CaptureInfo> {
     let path = PathBuf::from(path);
     if !path.is_file() {
-        return Err(EngineError::new("io", "file not found"));
+        return Err(EngineError::new("file_not_found", "file not found"));
     }
     blocking(&state, move |e| {
         e.open(

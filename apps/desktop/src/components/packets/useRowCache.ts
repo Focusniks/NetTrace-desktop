@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { api } from "../../api/client";
 import type { PacketRow } from "../../api/types";
+import { errorText } from "../../state/store";
 
 const PAGE = 200;
 const MAX_PAGES = 120;
@@ -83,7 +84,7 @@ export function useRowCache(captureId: number, viewId: number, version: number, 
           .catch((e: Error) => {
             if (cache.current.key !== requestKey) return;
             cache.current.failed.add(p);
-            setError(e.message);
+            setError(errorText(e));
           })
           .finally(() => {
             if (cache.current.key === requestKey) {

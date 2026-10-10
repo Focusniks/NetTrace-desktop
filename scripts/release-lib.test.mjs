@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  buildManifest,
   bumpCargoLock,
   bumpCargoToml,
   bumpJson,
@@ -125,4 +126,15 @@ test("checkManifest rejects wrong version, foreign URL, other key and missing si
   assert.ok(checkManifest(manifest(), SIG_002, otherKey, "0.0.2", REPO).some((e) => /does not trust/.test(e)));
   assert.ok(checkManifest(manifest(), "", PUBKEY, "0.0.2", REPO).some((e) => /differs/.test(e)));
   assert.deepEqual(checkManifest({ version: "0.0.2", platforms: {} }, SIG_002, PUBKEY, "0.0.2", REPO), ["latest.json has no windows-x86_64 platform"]);
+});
+
+test("buildManifest describes the signed installer for both updater keys", () => {
+  const url = `${REPO}/releases/download/v0.0.2/NetTrace_0.0.2_x64-setup.exe`;
+  const m = buildManifest({ version: "0.0.2", notes: "- fix", pubDate: "2026-10-10T00:00:00.000Z", url, signature: SIG_002 });
+  assert.deepEqual(Object.keys(m.platforms), ["windows-x86_64", "windows-x86_64-nsis"]);
+  assert.equal(m.pub_date, "2026-10-10T00:00:00.000Z");
+  assert.deepEqual(checkManifest(m, SIG_002, PUBKEY, "0.0.2", REPO), []);
+  // Every Windows entry is checked, not only the first.
+  m.platforms["windows-x86_64-nsis"].url = "https://evil.example/x.exe";
+  assert.ok(checkManifest(m, SIG_002, PUBKEY, "0.0.2", REPO).some((e) => /windows-x86_64-nsis/.test(e)));
 });

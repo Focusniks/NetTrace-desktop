@@ -8,6 +8,7 @@ import type {
   FieldInfo,
   FilterError,
   IndexProgress,
+  MatchLocation,
   PacketDetail,
   SortSpec,
   StreamRef,
@@ -15,6 +16,7 @@ import type {
 import { t, type MessageKey } from "../i18n";
 import type { ColorRule } from "../lib/coloring";
 import type { TimeFormat } from "../lib/format";
+import { resolveMatch } from "../lib/tree";
 import { loadSettings, saveSettings, type ColumnConfig, type Settings } from "./settings";
 
 export type DockTab = "streams" | "sequence" | "hosts" | "conversations" | "statistics" | "timeline" | "indicators";
@@ -84,7 +86,13 @@ interface State {
   /** Runs `action` now, or after asking to save an unsaved live capture. */
   guardUnsaved: (action: () => Promise<void>) => Promise<void>;
   setSort: (sort: SortSpec | null) => Promise<void>;
-  selectPacket: (number: number, opts?: { history?: boolean; scroll?: boolean; row?: number }) => Promise<void>;
+  selectPacket: (
+    number: number,
+    /** `reveal: false` for clicks inside a tool panel (a maximized panel stays maximized). */
+    opts?: { history?: boolean; scroll?: boolean; row?: number; match?: MatchLocation; reveal?: boolean },
+  ) => Promise<void>;
+  /** Un-maximizes the tool dock so the packet list (and the selection) is visible. */
+  revealPackets: () => void;
   selectRow: (row: number, number: number) => void;
   moveSelection: (delta: number | "first" | "last") => Promise<void>;
   back: () => void;
@@ -166,12 +174,28 @@ function replayEarlyProgress(get: () => State, captureId: number) {
   if (early?.captureId === captureId) get().onProgress(early);
 }
 
-export function errorText(e: unknown): string {
-  if (!(e instanceof BackendError)) return String(e);
-  // Known codes get a Russian explanation; the backend detail is kept for the specialist.
-  const key = `err.${e.code}` as MessageKey;
+/** Codes whose backend detail is an OS or driver message (localized by Windows) worth showing. */
+const DETAILED_ERRORS = new Set(["io", "capture_open", "capture_filter", "capture_read", "capture_unavailable", "internal"]);
+
+/** Russian text of a backend error code (with the OS detail where it helps). */
+export function describeError(code: string, message: string): string {
+  const key = `err.${code}` as MessageKey;
   const known = t(key);
-  return known === key ? `${e.code}: ${e.message}` : `${known} (${e.message})`;
+  if (known === key) return t("err.unknown", { code, message });
+  return DETAILED_ERRORS.has(code) && message ? `${known}: ${message}` : known;
+}
+
+export function errorText(e: unknown): string {
+  if (!(e instanceof BackendError)) return String(e instanceof Error ? e.message : e);
+  return describeError(e.code, e.message);
+}
+
+/** Why indexing or a live capture failed, in the UI language. */
+export function progressErrorText(p: IndexProgress): string {
+  if (!p.errorCode) return p.error ?? "";
+  // The backend message repeats the code as a prefix ("io: …").
+  const detail = (p.error ?? "").replace(new RegExp(`^${p.errorCode}: `), "");
+  return describeError(p.errorCode, detail);
 }
 
 export const useStore = create<State>((set, get) => ({
@@ -306,7 +330,7 @@ export const useStore = create<State>((set, get) => ({
       else if (s.filterText.trim()) void get().applyFilter(s.filterText);
       else set({ viewVersion: get().viewVersion + 1 });
       if (p.warning) get().flash(t(`status.warning.${p.warning}` as never));
-      if (p.error) get().flash(t("status.failed", { error: p.error }));
+      if (p.error) get().flash(t(s.capture.live ? "status.captureFailed" : "status.failed", { error: progressErrorText(p) }));
     }
   },
 
@@ -400,6 +424,7 @@ export const useStore = create<State>((set, get) => ({
       }
       if (my !== selectSeq) return;
     }
+    if (opts?.reveal !== false) get().revealPackets();
     if (opts?.history !== false) {
       const { history, historyPos } = get();
       const trimmed = history.slice(0, historyPos + 1);
@@ -412,7 +437,11 @@ export const useStore = create<State>((set, get) => ({
     set({ detailLoading: true });
     try {
       const detail = await api.packetDetail(number);
-      if (seq === detailSeq) set({ detail, detailLoading: false, detailError: null, highlight: null, selectedFieldKey: null });
+      // A search hit selects and highlights what matched.
+      const match = opts?.match ? resolveMatch(detail.tree, opts.match) : { highlight: null, key: null };
+      if (seq === detailSeq) {
+        set({ detail, detailLoading: false, detailError: null, highlight: match.highlight, selectedFieldKey: match.key });
+      }
     } catch (e) {
       if (seq === detailSeq) {
         set({ detail: null, detailLoading: false, detailError: errorText(e), highlight: null, selectedFieldKey: null });
@@ -464,6 +493,10 @@ export const useStore = create<State>((set, get) => ({
       set({ historyPos: historyPos + 1 });
       void get().selectPacket(history[historyPos + 1], { history: false });
     }
+  },
+
+  revealPackets() {
+    if (get().dockMaximized) set({ dockMaximized: false });
   },
 
   setHighlight(h, key = null) {

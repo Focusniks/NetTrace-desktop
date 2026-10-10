@@ -1,9 +1,10 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type uPlot from "uplot";
 
 import { api } from "../../api/client";
 import type { ProtocolNode } from "../../api/types";
 import { t, type MessageKey } from "../../i18n";
+import { ioSourceFilter, type IoSource as Source } from "../../lib/filters";
 import { fmtBytes, fmtInt, fmtPercent } from "../../lib/format";
 import { applyFilterText, filterByTerm } from "../../state/actions";
 import { useStore } from "../../state/store";
@@ -93,7 +94,6 @@ function Hierarchy() {
 }
 
 const INTERVALS = [0.001, 0.01, 0.1, 1, 10, 60];
-type Source = "all" | "displayed" | "protocol" | "stream" | "custom";
 const PROTOCOLS = ["tcp", "udp", "dns", "tls", "http", "icmp", "arp", "ipv6"];
 
 function IoGraphView() {
@@ -101,27 +101,25 @@ function IoGraphView() {
   const duration = useStore((s) => s.summary?.duration ?? 0);
   const [interval, setInterval_] = useState<number | null>(null);
   const [metric, setMetric] = useState<"pps" | "bps">("pps");
+  const focus = useStore((s) => s.focusStream);
   const [source, setSource] = useState<Source>("all");
   const [protocol, setProtocol] = useState("tcp");
-  const [stream, setStream] = useState("0");
+  // The stream shown in the Streams/Sequence panels is the natural default.
+  const [streamKind, setStreamKind] = useState<"tcp" | "udp">(focus?.kind ?? "tcp");
+  const [stream, setStream] = useState(String(focus?.id ?? 0));
+  useEffect(() => {
+    if (!focus) return;
+    setStreamKind(focus.kind);
+    setStream(String(focus.id));
+  }, [focus]);
   const [custom, setCustom] = useState("");
   const auto = duration > 0 ? INTERVALS.find((i) => duration / i <= 1500) ?? 60 : 1;
   const step = interval ?? auto;
 
-  const filter = useMemo(() => {
-    switch (source) {
-      case "all":
-        return null;
-      case "displayed":
-        return appliedFilter || null;
-      case "protocol":
-        return protocol;
-      case "stream":
-        return `tcp.stream == ${Number.parseInt(stream, 10) || 0}`;
-      case "custom":
-        return custom.trim() || null;
-    }
-  }, [source, appliedFilter, protocol, stream, custom]);
+  const filter = useMemo(
+    () => ioSourceFilter(source, { applied: appliedFilter, protocol, streamKind, stream, custom }),
+    [source, appliedFilter, protocol, streamKind, stream, custom],
+  );
 
   const all = useBackend(() => api.ioGraph(step, null), [step]);
   const sel = useBackend(() => (filter ? api.ioGraph(step, filter) : Promise.resolve(null)), [step, filter]);
@@ -183,6 +181,17 @@ function IoGraphView() {
         />
         {source === "protocol" ? (
           <Select value={protocol} options={PROTOCOLS.map((p) => ({ value: p, label: p.toUpperCase() }))} onChange={setProtocol} />
+        ) : null}
+        {source === "stream" ? (
+          <Select
+            value={streamKind}
+            options={[
+              { value: "tcp" as const, label: "TCP" },
+              { value: "udp" as const, label: "UDP" },
+            ]}
+            onChange={setStreamKind}
+            ariaLabel={t("stats.io.streamKind")}
+          />
         ) : null}
         {source === "stream" ? (
           <input className="input mono" style={{ width: 70 }} autoComplete="off" spellCheck={false} value={stream} onChange={(e) => setStream(e.target.value)} />

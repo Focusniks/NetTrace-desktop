@@ -2057,7 +2057,7 @@ dependencies = [
 name = "nettrace-engine"
 version = "1.0.1"
 dependencies = [
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "nettrace-analysis",
  "nettrace-capture",
  "nettrace-flow",

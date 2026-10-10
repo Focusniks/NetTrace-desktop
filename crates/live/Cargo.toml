@@ -8,7 +8,7 @@ license.workspace = true
 [dependencies]
 nettrace-packet.workspace = true
 nettrace-model.workspace = true
-libloading = "0.8"
+libloading = "0.9"
 thiserror.workspace = true
 
 # FFI to the capture library needs `unsafe` in one module (`ffi.rs`); everything

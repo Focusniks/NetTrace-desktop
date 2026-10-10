@@ -2007,7 +2007,7 @@ dependencies = [
 
 [[package]]
 name = "nettrace-analysis"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "hashbrown 0.17.1",
  "nettrace-flow",
@@ -2018,7 +2018,7 @@ dependencies = [
 
 [[package]]
 name = "nettrace-capture"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "nettrace-packet",
  "tempfile",
@@ -2027,7 +2027,7 @@ dependencies = [
 
 [[package]]
 name = "nettrace-desktop"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "nettrace-engine",
  "nettrace-model",
@@ -2042,7 +2042,7 @@ dependencies = [
 
 [[package]]
 name = "nettrace-devbridge"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "nettrace-capture",
  "nettrace-engine",
@@ -2055,7 +2055,7 @@ dependencies = [
 
 [[package]]
 name = "nettrace-engine"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "getrandom 0.3.4",
  "nettrace-analysis",
@@ -2078,7 +2078,7 @@ dependencies = [
 
 [[package]]
 name = "nettrace-flow"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "hashbrown 0.17.1",
  "nettrace-model",
@@ -2089,7 +2089,7 @@ dependencies = [
 
 [[package]]
 name = "nettrace-live"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "libloading 0.8.9",
  "nettrace-model",
@@ -2099,7 +2099,7 @@ dependencies = [
 
 [[package]]
 name = "nettrace-model"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -2107,11 +2107,11 @@ dependencies = [
 
 [[package]]
 name = "nettrace-packet"
-version = "1.0.0"
+version = "1.0.1"
 
 [[package]]
 name = "nettrace-protocol"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "nettrace-model",
  "nettrace-packet",
@@ -2120,7 +2120,7 @@ dependencies = [
 
 [[package]]
 name = "nettrace-query"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "nettrace-model",
  "nettrace-packet",
@@ -2128,7 +2128,7 @@ dependencies = [
 
 [[package]]
 name = "nettrace-storage"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "hashbrown 0.17.1",
  "nettrace-packet",
@@ -2137,7 +2137,7 @@ dependencies = [
 
 [[package]]
 name = "nettrace-testkit"
-version = "1.0.0"
+version = "1.0.1"
 dependencies = [
  "nettrace-capture",
  "nettrace-packet",

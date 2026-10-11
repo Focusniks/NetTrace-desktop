@@ -624,3 +624,209 @@ fn a_crashing_capture_driver_ends_the_session() {
     assert_ne!(p.state, IndexState::Indexing, "indexing must not wait forever for a dead recorder");
     assert!(!e.session().unwrap().capturing());
 }
+
+mod follow {
+    use super::*;
+    use base64::Engine as _;
+    use nettrace_engine::FollowRequest;
+    use nettrace_model::{Direction, FollowChunkKind, FollowDirection, FollowPage};
+    use nettrace_testkit::build;
+    use nettrace_testkit::scenarios::{CLIENT, SERVER};
+    use nettrace_testkit::{Capture, TcpConv};
+
+    fn page(e: &Engine, kind: Transport, id: u32, direction: FollowDirection, offset: u64, limit: u32) -> FollowPage {
+        e.follow_stream(&FollowRequest { stream: StreamRef { kind, id }, direction, offset, limit }).unwrap()
+    }
+
+    /// All data bytes of a stream with their directions, read page by page.
+    fn data(e: &Engine, kind: Transport, id: u32, direction: FollowDirection, limit: u32) -> (Vec<u8>, Vec<Direction>, usize) {
+        let (mut bytes, mut dirs, mut gaps, mut offset) = (Vec::new(), Vec::new(), 0, 0);
+        for _ in 0..10_000 {
+            let p = page(e, kind, id, direction, offset, limit);
+            for c in &p.chunks {
+                match c.kind {
+                    FollowChunkKind::Data => {
+                        bytes.extend(base64::engine::general_purpose::STANDARD.decode(c.data.as_ref().unwrap()).unwrap());
+                        if dirs.last() != Some(&c.direction) {
+                            dirs.push(c.direction);
+                        }
+                    }
+                    _ => gaps += 1,
+                }
+            }
+            if p.done {
+                return (bytes, dirs, gaps);
+            }
+            // A finished capture never waits; an empty page just continues.
+            assert!(!p.waiting);
+            assert!(p.next_offset >= offset);
+            offset = p.next_offset;
+        }
+        panic!("the stream never finished");
+    }
+
+    #[test]
+    fn follows_a_conversation_in_order() {
+        let f = fixture("basic.pcap", scenarios::tcp_basic().to_pcap());
+        let e = open(&f.path);
+        let request = build::http_request("GET", "example.test", "/index.html");
+        let response = build::http_response(200, "OK", "<html>hello</html>");
+        let (bytes, dirs, gaps) = data(&e, Transport::Tcp, 0, FollowDirection::Both, 1 << 20);
+        assert_eq!(bytes, [request.clone(), response.clone()].concat());
+        assert_eq!((dirs, gaps), (vec![Direction::C2s, Direction::S2c], 0));
+        assert_eq!(data(&e, Transport::Tcp, 0, FollowDirection::C2s, 1 << 20).0, request);
+        assert_eq!(data(&e, Transport::Tcp, 0, FollowDirection::S2c, 1 << 20).0, response);
+    }
+
+    #[test]
+    fn retransmissions_and_reordering_are_resolved() {
+        let f = fixture("problems.pcap", scenarios::tcp_problems().to_pcap());
+        let e = open(&f.path);
+        let (c2s, _, gaps) = data(&e, Transport::Tcp, 0, FollowDirection::C2s, 1 << 20);
+        assert_eq!(c2s, [[1u8; 100], [2; 100], [3; 100], [4; 100]].concat());
+        assert_eq!(gaps, 0);
+        assert_eq!(data(&e, Transport::Tcp, 0, FollowDirection::S2c, 1 << 20).0, vec![9u8; 200]);
+        // Small pages give exactly the same bytes as one big page.
+        let whole = data(&e, Transport::Tcp, 0, FollowDirection::Both, 1 << 20).0;
+        assert_eq!(data(&e, Transport::Tcp, 0, FollowDirection::Both, 37).0, whole);
+        let p = page(&e, Transport::Tcp, 0, FollowDirection::Both, 250, 10);
+        let got = base64::engine::general_purpose::STANDARD.decode(p.chunks[0].data.as_ref().unwrap()).unwrap();
+        assert_eq!((p.chunks[0].offset, got.as_slice()), (250, &whole[250..260]));
+    }
+
+    #[test]
+    fn lost_segments_become_gaps() {
+        let mut cap = Capture::ethernet();
+        let mut c = TcpConv::new(CLIENT, 50_100, SERVER, 80);
+        c.handshake(&mut cap, 100);
+        c.send(&mut cap, true, &[1u8; 100], 100);
+        c.cseq = c.cseq.wrapping_add(50); // 50 bytes never captured
+        c.send(&mut cap, true, &[2u8; 100], 100);
+        let f = fixture("lost.pcap", cap.to_pcap());
+        let e = open(&f.path);
+        let p = page(&e, Transport::Tcp, 0, FollowDirection::Both, 0, 1 << 20);
+        let kinds: Vec<_> = p.chunks.iter().map(|c| (c.kind, c.len, c.stream_offset)).collect();
+        assert_eq!(kinds, [(FollowChunkKind::Data, 100, 0), (FollowChunkKind::Gap, 50, 100), (FollowChunkKind::Data, 100, 150)]);
+    }
+
+    #[test]
+    fn holes_are_reported_once_across_pages() {
+        let mut cap = Capture::ethernet();
+        let mut c = TcpConv::new(CLIENT, 50_101, SERVER, 80);
+        c.handshake(&mut cap, 100);
+        c.send(&mut cap, true, &[1u8; 100], 100);
+        c.cseq = c.cseq.wrapping_add(50);
+        c.send(&mut cap, true, &[2u8; 100], 100);
+        let f = fixture("lost_pages.pcap", cap.to_pcap());
+        let e = open(&f.path);
+        // Pages ending right before the gap (10, 100), around it (7) or past it.
+        for limit in [10, 7, 100, 1 << 20] {
+            let (bytes, _, gaps) = data(&e, Transport::Tcp, 0, FollowDirection::Both, limit);
+            assert_eq!((bytes.len(), gaps), (200, 1), "limit {limit}");
+        }
+    }
+
+    #[test]
+    fn long_stretches_without_payload_do_not_stall() {
+        // The client sends a few bytes, then only the server talks: following
+        // the client side walks well past one request's step budget.
+        let mut cap = Capture::ethernet();
+        let mut c = TcpConv::new(CLIENT, 50_102, SERVER, 80);
+        c.handshake(&mut cap, 100);
+        c.send(&mut cap, true, b"hi", 100);
+        for _ in 0..120_000 {
+            c.send(&mut cap, false, b"x", 1);
+        }
+        c.send(&mut cap, true, b"bye", 100);
+        let f = fixture("long.pcap", cap.to_pcap());
+        let e = open(&f.path);
+        assert_eq!(data(&e, Transport::Tcp, 0, FollowDirection::C2s, 1 << 20).0, b"hibye");
+    }
+
+    #[test]
+    fn tiny_segments_are_joined_into_few_chunks() {
+        let mut cap = Capture::ethernet();
+        let mut c = TcpConv::new(CLIENT, 50_104, SERVER, 22);
+        c.handshake(&mut cap, 100);
+        for _ in 0..3000 {
+            c.send(&mut cap, true, b"k", 10);
+        }
+        let f = fixture("keys.pcap", cap.to_pcap());
+        let e = open(&f.path);
+        let p = page(&e, Transport::Tcp, 0, FollowDirection::Both, 0, 1 << 20);
+        let lens: Vec<u32> = p.chunks.iter().map(|c| c.len).collect();
+        assert!(lens.len() <= 3 && lens.iter().sum::<u32>() == 3000, "{lens:?}");
+        assert_eq!(data(&e, Transport::Tcp, 0, FollowDirection::Both, 100).0, vec![b'k'; 3000]);
+    }
+
+    #[test]
+    fn data_on_a_syn_starts_the_stream() {
+        // TCP Fast Open: the SYN carries the first bytes.
+        let mut cap = Capture::ethernet();
+        let mut c = TcpConv::new(CLIENT, 50_103, SERVER, 80);
+        let syn = c.segment(true, 0x02, c.cseq, 0, b"GET", vec![]);
+        cap.push_after_us(1, syn);
+        c.cseq = c.cseq.wrapping_add(4);
+        c.send(&mut cap, true, b" /", 100);
+        let f = fixture("tfo.pcap", cap.to_pcap());
+        let e = open(&f.path);
+        let (bytes, _, gaps) = data(&e, Transport::Tcp, 0, FollowDirection::C2s, 1 << 20);
+        assert_eq!((bytes.as_slice(), gaps), (&b"GET /"[..], 0));
+    }
+
+    #[test]
+    fn udp_datagrams_and_export() {
+        let (f, e) = demo();
+        let _ = f;
+        let (dns, dirs, _) = data(&e, Transport::Udp, 0, FollowDirection::Both, 1 << 20);
+        assert!(!dns.is_empty() && dirs[0] == Direction::C2s);
+
+        let basic = fixture("basic.pcap", scenarios::tcp_basic().to_pcap());
+        let e = open(&basic.path);
+        let out = basic.path.with_file_name("stream.bin");
+        let n = e.export_stream(StreamRef { kind: Transport::Tcp, id: 0 }, FollowDirection::Both, &out).unwrap();
+        let saved = std::fs::read(&out).unwrap();
+        let whole = data(&e, Transport::Tcp, 0, FollowDirection::Both, 1 << 20).0;
+        assert_eq!((n.bytes as usize, n.missing, saved), (whole.len(), 0, whole));
+        assert_eq!(e.export_stream(StreamRef { kind: Transport::Tcp, id: 0 }, FollowDirection::Both, &basic.path).unwrap_err().code, "export_same_file");
+        let leftovers = std::fs::read_dir(out.parent().unwrap()).unwrap().filter(|x| x.as_ref().unwrap().file_name().to_string_lossy().ends_with(".part")).count();
+        assert_eq!(leftovers, 0);
+    }
+}
+
+#[test]
+#[ignore]
+fn bench_follow_large_stream() {
+    use nettrace_engine::FollowRequest;
+    use nettrace_model::FollowDirection;
+    use nettrace_testkit::scenarios::{CLIENT, SERVER};
+    use nettrace_testkit::{Capture, TcpConv};
+    let mut cap = Capture::ethernet();
+    let mut c = TcpConv::new(CLIENT, 50_200, SERVER, 80);
+    c.handshake(&mut cap, 100);
+    let seg = vec![7u8; 1400];
+    for i in 0..50_000 {
+        c.send(&mut cap, false, &seg, 10);
+        if i % 2 == 0 {
+            c.ack(&mut cap, true, 10);
+        }
+    }
+    let f = fixture("bench.pcap", cap.to_pcap());
+    let e = open(&f.path);
+    let t = std::time::Instant::now();
+    let (mut offset, mut pages) = (0u64, 0);
+    loop {
+        let p = e.follow_stream(&FollowRequest { stream: StreamRef { kind: Transport::Tcp, id: 0 }, direction: FollowDirection::Both, offset, limit: 256 * 1024 }).unwrap();
+        pages += 1;
+        if p.done { break; }
+        offset = p.next_offset;
+    }
+    eprintln!("follow: {} MB in {pages} pages, {:?}", offset >> 20, t.elapsed());
+    let t = std::time::Instant::now();
+    let p = e.follow_stream(&FollowRequest { stream: StreamRef { kind: Transport::Tcp, id: 0 }, direction: FollowDirection::Both, offset: 50_000_000, limit: 256 * 1024 }).unwrap();
+    eprintln!("random page: {} chunks, {:?}", p.chunks.len(), t.elapsed());
+    let out = f.path.with_file_name("bench.bin");
+    let t = std::time::Instant::now();
+    let r = e.export_stream(StreamRef { kind: Transport::Tcp, id: 0 }, FollowDirection::Both, &out).unwrap();
+    eprintln!("export: {} MB, {:?}", r.bytes >> 20, t.elapsed());
+}

@@ -6,10 +6,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use nettrace_engine::{
-    ConversationQuery, Engine, EngineError, FlowQuery, HostQuery, IoGraphRequest, SearchHit, SearchRequest, SortSpec, TimelineRequest,
+    ConversationQuery, Engine, EngineError, FlowQuery, FollowRequest, HostQuery, IoGraphRequest, SearchHit, SearchRequest, SortSpec, TimelineRequest,
 };
 use nettrace_model::{
-    CaptureInfo, CaptureInterface, CaptureSummary, LiveOptions, ConversationPage, FieldInfo, FilterError, FlowPage, FlowSummary,
+    CaptureInfo, CaptureInterface, CaptureSummary, LiveOptions, ConversationPage, FieldInfo, FilterError, FlowPage, FlowSummary, FollowDirection, FollowPage, StreamExport,
     HostPage, IndexProgress, Indicator, IoGraph, PacketDetail, PacketLengths, PacketRow, ProtocolNode, SequencePage,
     StreamRef, Timeline, ViewInfo,
 };
@@ -155,6 +155,11 @@ pub async fn get_sequence(state: State<'_, AppState>, stream: StreamRef, offset:
 }
 
 #[tauri::command]
+pub async fn follow_stream(state: State<'_, AppState>, request: FollowRequest) -> CmdResult<FollowPage> {
+    blocking(&state, move |e| e.follow_stream(&request)).await
+}
+
+#[tauri::command]
 pub async fn get_hosts_page(state: State<'_, AppState>, query: HostQuery) -> CmdResult<HostPage> {
     blocking(&state, move |e| e.hosts_page(&query)).await
 }
@@ -222,6 +227,28 @@ pub async fn export_view(
             path.set_extension("pcap");
         }
         e.export(view_id, &path).map(Some)
+    })
+    .await
+}
+
+/// Saves the reassembled payload of a stream (raw bytes). Like `export_view`,
+/// the destination comes from a native dialog opened by the backend.
+#[tauri::command]
+pub async fn export_stream(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    stream: StreamRef,
+    direction: FollowDirection,
+    default_name: String,
+    title: String,
+) -> CmdResult<Option<StreamExport>> {
+    use tauri_plugin_dialog::DialogExt;
+    blocking(&state, move |e| {
+        let name: String = default_name.chars().filter(|c| !matches!(c, '/' | '\\' | ':')).take(120).collect();
+        let picked = app.dialog().file().set_title(title).set_file_name(name).add_filter("BIN", &["bin"]).blocking_save_file();
+        let Some(picked) = picked else { return Ok(None) };
+        let path = picked.into_path().map_err(|e| EngineError::new("io", e.to_string()))?;
+        e.export_stream(stream, direction, &path).map(Some)
     })
     .await
 }

@@ -110,6 +110,69 @@ pub enum Direction {
     S2c,
 }
 
+/// Which side of a stream to follow.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FollowDirection {
+    Both,
+    C2s,
+    S2c,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum FollowChunkKind {
+    /// Payload bytes (in `data`).
+    Data,
+    /// Bytes that were sent but never captured (lost segments).
+    Gap,
+    /// Bytes cut off by the capture length (snaplen).
+    NotCaptured,
+}
+
+/// A piece of a followed stream: payload of one packet, or a hole.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FollowChunk {
+    pub kind: FollowChunkKind,
+    pub direction: Direction,
+    /// Packet the bytes come from (1-based); for holes, the packet after them.
+    pub number: u32,
+    /// Position in the followed output (counts `Data` bytes only).
+    pub offset: u64,
+    /// Position in this direction of the stream (relative sequence number).
+    pub stream_offset: u64,
+    pub len: u32,
+    /// Base64 of the bytes (`Data` only).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<String>,
+}
+
+/// One page of a followed stream.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FollowPage {
+    pub offset: u64,
+    /// Offset to ask for next.
+    pub next_offset: u64,
+    /// The end of the stream was reached.
+    pub done: bool,
+    /// The end of the packets indexed so far was reached; a running capture
+    /// may add more. Without `done` or `waiting`, the next page continues
+    /// right away (a page may be empty when a long stretch had no payload).
+    pub waiting: bool,
+    pub chunks: Vec<FollowChunk>,
+}
+
+/// Result of saving a stream's payload to a file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamExport {
+    pub bytes: u64,
+    /// Bytes of the stream that were not captured (lost segments, snaplen) and are not in the file.
+    pub missing: u64,
+}
+
 /// One arrow of the sequence (ladder) diagram.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]

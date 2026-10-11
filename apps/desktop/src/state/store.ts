@@ -19,7 +19,7 @@ import type { TimeFormat } from "../lib/format";
 import { resolveMatch } from "../lib/tree";
 import { loadSettings, saveSettings, type ColumnConfig, type Settings } from "./settings";
 
-export type DockTab = "streams" | "sequence" | "hosts" | "conversations" | "statistics" | "timeline" | "indicators";
+export type DockTab = "streams" | "sequence" | "follow" | "hosts" | "conversations" | "statistics" | "timeline" | "indicators";
 export type DialogId = "goto" | "coloring" | "properties" | "about" | "shortcuts" | "fields" | "capture" | "unsaved" | "update" | null;
 
 export interface Highlight {

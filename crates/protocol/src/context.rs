@@ -11,17 +11,21 @@ pub struct DissectOptions {
     pub info: bool,
     /// Report application events (DNS query, TLS SNI, HTTP request …).
     pub events: bool,
+    /// Dissect application protocols (off: stop at TCP/UDP).
+    pub app: bool,
 }
 
 impl DissectOptions {
     /// Indexing pass: summary + events, no strings for the tree.
-    pub const INDEX: DissectOptions = DissectOptions { tree: TreeMode::Off, info: false, events: true };
+    pub const INDEX: DissectOptions = DissectOptions { tree: TreeMode::Off, info: false, events: true, app: true };
     /// Packet list row.
-    pub const ROW: DissectOptions = DissectOptions { tree: TreeMode::Off, info: true, events: false };
+    pub const ROW: DissectOptions = DissectOptions { tree: TreeMode::Off, info: true, events: false, app: true };
     /// Deep display filter.
-    pub const VALUES: DissectOptions = DissectOptions { tree: TreeMode::Values, info: false, events: false };
+    pub const VALUES: DissectOptions = DissectOptions { tree: TreeMode::Values, info: false, events: false, app: true };
     /// Packet details pane.
-    pub const FULL: DissectOptions = DissectOptions { tree: TreeMode::Full, info: true, events: false };
+    pub const FULL: DissectOptions = DissectOptions { tree: TreeMode::Full, info: true, events: false, app: true };
+    /// Transport only (sequence numbers, payload range): following a stream.
+    pub const TRANSPORT: DissectOptions = DissectOptions { tree: TreeMode::Off, info: false, events: false, app: false };
 }
 
 /// Facts about the frame supplied by the caller (capture + analysis layers).
@@ -117,6 +121,8 @@ pub struct Summary {
     /// IP length field. May exceed the captured length (snaplen truncation).
     pub ip_end: Option<usize>,
     pub transport: Option<TransportInfo>,
+    /// Frame range of the captured TCP/UDP payload.
+    pub payload: Option<(usize, usize)>,
     pub malformed: bool,
     pub event: Option<AppEvent>,
 }

@@ -92,6 +92,7 @@ function useMenus(): { id: MessageKey; items: MenuEntry[] }[] {
         { label: t("action.clearFilter"), disabled: none, onSelect: () => void st.applyFilter("") },
         { kind: "separator" },
         { label: t("action.followStream"), shortcut: "Enter", disabled: !hasStream, onSelect: () => commands.followSelected("streams") },
+        { label: t("action.followContent"), disabled: !hasStream, onSelect: () => commands.followSelected("follow") },
         { label: t("action.sequence"), disabled: !hasStream, onSelect: () => commands.followSelected("sequence") },
         { kind: "separator" },
         dock("indicators", "dock.indicators"),

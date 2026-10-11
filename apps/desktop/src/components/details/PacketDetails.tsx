@@ -148,6 +148,7 @@ export function PacketDetails() {
       items.push(
         { kind: "separator" },
         { label: t("ctx.followStream", { kind: stream.kind.toUpperCase(), id: stream.id }), onSelect: () => openStream(stream) },
+        { label: t("ctx.followContent"), onSelect: () => openStream(stream, "follow") },
         { label: t("ctx.sequence"), onSelect: () => openStream(stream, "sequence") },
       );
     }

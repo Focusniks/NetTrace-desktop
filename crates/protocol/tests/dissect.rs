@@ -465,3 +465,30 @@ fn every_label_key_is_translated_in_the_ui() {
     let missing: Vec<_> = nettrace_protocol::labels::ALL.iter().filter(|k| !ru.contains(&format!("\"tree.{k}\""))).collect();
     assert!(missing.is_empty(), "tree.* keys missing in ru.ts: {missing:?}");
 }
+
+#[test]
+fn transport_only_dissection_gives_the_payload_range() {
+    let hello = build::tls_client_hello("api.example.com");
+    let f = tcp_frame(tcpf::PSH | tcpf::ACK, &hello, 443);
+    let d = dissect(&f, &ctx(LinkType::Ethernet, f.len()), DissectOptions::TRANSPORT);
+    assert!(!d.summary.protocols.contains(ProtocolId::Tls), "application layers are skipped");
+    let (start, end) = d.summary.payload.unwrap();
+    assert_eq!(&f[start..end], &hello[..]);
+    let Some(TransportInfo::Tcp(t)) = d.summary.transport else { panic!("tcp") };
+    assert_eq!(t.seq, 1000);
+
+    // Snaplen: the range covers what was captured; the wire length stays known.
+    let cut = &f[..f.len() - 10];
+    let mut fctx = ctx(LinkType::Ethernet, cut.len());
+    fctx.origlen = f.len() as u32;
+    let d = dissect(cut, &fctx, DissectOptions::TRANSPORT);
+    let (start, end) = d.summary.payload.unwrap();
+    assert_eq!(end - start, hello.len() - 10);
+    let Some(TransportInfo::Tcp(t)) = d.summary.transport else { panic!("tcp") };
+    assert_eq!(t.payload_len as usize, hello.len());
+
+    let udp = build::ethernet(SERVER.mac, CLIENT.mac, build::ETH_IPV4, &build::ipv4(CLIENT.ip, SERVER.ip, 17, 1, 64, &build::udp(5000, 53, b"abc")));
+    let d = dissect(&udp, &ctx(LinkType::Ethernet, udp.len()), DissectOptions::TRANSPORT);
+    let (start, end) = d.summary.payload.unwrap();
+    assert_eq!(&udp[start..end], b"abc");
+}

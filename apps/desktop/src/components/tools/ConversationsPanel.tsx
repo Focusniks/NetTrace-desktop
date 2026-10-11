@@ -94,6 +94,7 @@ export function ConversationsPanel() {
                 ? [
                     { kind: "separator" as const },
                     { label: t("conv.open"), onSelect: () => useStore.getState().focusOnStream(stream, "streams") },
+                    { label: t("ctx.followContent"), onSelect: () => useStore.getState().focusOnStream(stream, "follow") },
                     { label: t("ctx.sequence"), onSelect: () => useStore.getState().focusOnStream(stream, "sequence") },
                   ]
                 : []),

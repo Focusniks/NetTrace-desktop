@@ -38,6 +38,7 @@ pub fn run() {
             commands::list_flows,
             commands::get_flow,
             commands::get_sequence,
+            commands::follow_stream,
             commands::get_hosts_page,
             commands::get_conversations_page,
             commands::get_protocol_hierarchy,
@@ -47,6 +48,7 @@ pub fn run() {
             commands::get_indicators,
             commands::search,
             commands::export_view,
+            commands::export_stream,
         ])
         .build(tauri::generate_context!())
         .expect("error while building the application")

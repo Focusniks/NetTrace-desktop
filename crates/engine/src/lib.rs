@@ -8,6 +8,7 @@
 mod error;
 mod export;
 mod fields;
+mod follow;
 mod frame;
 mod indexer;
 mod live;
@@ -29,7 +30,7 @@ use nettrace_live::LiveSource;
 
 use nettrace_model::{
     CaptureInfo, CaptureInterface, CaptureSummary, LiveOptions, ConversationPage, FieldInfo, FilterError, FlowPage, FlowSummary,
-    HostPage, IndexProgress, Indicator, IoGraph, PacketDetail, PacketLengths, PacketRow, ProtocolNode,
+    FollowDirection, FollowPage, HostPage, StreamExport, IndexProgress, Indicator, IoGraph, PacketDetail, PacketLengths, PacketRow, ProtocolNode,
     SequencePage, StreamRef, Timeline, ViewInfo,
 };
 use nettrace_query::Filter;
@@ -47,6 +48,16 @@ pub use view::{SortKey, SortSpec};
 
 use crate::error::filter_error;
 use crate::view::{filter_indices, sort_rows, View};
+
+/// A page of a followed stream: `limit` payload bytes from output `offset`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FollowRequest {
+    pub stream: StreamRef,
+    pub direction: FollowDirection,
+    pub offset: u64,
+    pub limit: u32,
+}
 
 const MAX_ROWS_PER_REQUEST: u32 = 2000;
 
@@ -473,6 +484,43 @@ impl Engine {
         let v = self.view(&s, req.view_id)?;
         let job = s.next_search();
         search::search(&s.data, &s.file, &v, req, |t| self.compile(t), &|| s.search_current(job))
+    }
+
+    /// One page of a stream's payload in order («Показать поток»).
+    pub fn follow_stream(&self, req: &FollowRequest) -> Result<FollowPage> {
+        let s = self.session()?;
+        let indexing = s.is_indexing();
+        let sh = s.data.read();
+        let (fi, f) = sh.flows.stream(req.stream.kind, req.stream.id).ok_or_else(|| EngineError::not_found("stream"))?;
+        let mut cache = s.follow_cache.lock();
+        follow::page(&sh, &s.file, fi, f, req.direction, req.offset, req.limit, indexing, &mut cache)
+    }
+
+    /// Writes a stream's payload (raw bytes, holes skipped) to `path`.
+    pub fn export_stream(&self, stream: StreamRef, direction: FollowDirection, path: &Path) -> Result<StreamExport> {
+        let s = self.session()?;
+        if s.is_indexing() {
+            return Err(EngineError::new("export_indexing", "indexing is still in progress"));
+        }
+        if same_file(Path::new(&s.info.path), path) {
+            return Err(EngineError::new("export_same_file", "cannot overwrite the open capture"));
+        }
+        let sh = s.data.read();
+        let (_, f) = sh.flows.stream(stream.kind, stream.id).ok_or_else(|| EngineError::not_found("stream"))?;
+        // Written next to the target and renamed at the end: no half-written file under its name.
+        let (out, part) = export::sibling_part(path)?;
+        let mut w = std::io::BufWriter::with_capacity(1 << 20, out);
+        let result = (|| {
+            let n = follow::write_all(&sh, &s.file, f, direction, &mut w)?;
+            w.into_inner().map_err(|e| e.into_error())?.sync_all()?;
+            std::fs::rename(&part, path)?;
+            Ok(n)
+        })();
+        if result.is_err() {
+            // Best effort: the error being returned matters more than a leftover file.
+            let _ = std::fs::remove_file(&part);
+        }
+        result
     }
 
     /// Writes the packets of a view to a new capture file. Returns the packet count.

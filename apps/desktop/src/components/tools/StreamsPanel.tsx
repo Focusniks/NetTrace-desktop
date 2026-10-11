@@ -77,6 +77,7 @@ export function StreamsPanel() {
           onContextMenu={(e, f) =>
             showContextMenu(e, [
               { label: t("stream.filter"), onSelect: () => applyFilterText(streamFilter(f)) },
+              { label: t("stream.content"), onSelect: () => useStore.getState().focusOnStream({ kind: f.kind, id: f.id }, "follow") },
               { label: t("stream.sequence"), onSelect: () => useStore.getState().focusOnStream({ kind: f.kind, id: f.id }, "sequence") },
               { label: t("stream.first"), onSelect: () => void useStore.getState().selectPacket(f.firstPacket) },
               { label: t("stream.last"), onSelect: () => void useStore.getState().selectPacket(f.lastPacket) },
@@ -175,6 +176,10 @@ export function StreamDetail() {
         <button className="btn btn-small btn-primary" onClick={() => applyFilterText(streamFilter(f))}>
           <Icon name="filter" />
           {t("stream.filter")}
+        </button>
+        <button className="btn btn-small" onClick={() => useStore.getState().focusOnStream({ kind: f.kind, id: f.id }, "follow")}>
+          <Icon name="stream" />
+          {t("stream.content")}
         </button>
         <button className="btn btn-small" onClick={() => useStore.getState().focusOnStream({ kind: f.kind, id: f.id }, "sequence")}>
           <Icon name="sequence" />

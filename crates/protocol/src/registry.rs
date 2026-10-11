@@ -260,6 +260,7 @@ fn run(reg: &Registry, frame: &[u8], fctx: &FrameContext, opts: DissectOptions) 
         };
         ctx.tree.close_to(depth);
         step = match result {
+            Ok(Handoff::Payload { .. }) if !ctx.opts.app => Step::Done,
             Ok(h) => resolve(reg, frame, h),
             // Running out of bytes is expected when the payload is knowingly cut;
             // invalid values are still malformed.

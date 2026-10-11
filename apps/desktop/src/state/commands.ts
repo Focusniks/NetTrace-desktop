@@ -135,7 +135,7 @@ export const commands = {
     if (st.dockOpen && st.dockTab === tab) st.setDock({ dockOpen: false });
     else st.openDock(tab);
   },
-  followSelected(tab: "streams" | "sequence" = "streams") {
+  followSelected(tab: "streams" | "sequence" | "follow" = "streams") {
     const stream = s().detail?.stream;
     if (stream) s().focusOnStream(stream, tab);
   },

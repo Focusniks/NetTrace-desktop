@@ -74,6 +74,7 @@ fn dispatch(engine: &Engine, cmd: &str, a: &Value) -> Result<Value, EngineError>
         "list_flows" => ok(engine.flows(&arg::<FlowQuery>(a, "query")?)?),
         "get_flow" => ok(engine.flow(arg::<StreamRef>(a, "stream")?)?),
         "get_sequence" => ok(engine.sequence(arg(a, "stream")?, arg(a, "offset")?, arg(a, "limit")?)?),
+        "follow_stream" => ok(engine.follow_stream(&arg(a, "request")?)?),
         "get_hosts_page" => ok(engine.hosts_page(&arg(a, "query")?)?),
         "get_conversations_page" => ok(engine.conversations_page(&arg(a, "query")?)?),
         "get_protocol_hierarchy" => ok(engine.protocol_hierarchy()?),

@@ -67,6 +67,7 @@ impl Dissector for Udp {
         if payload_len == 0 {
             return Ok(Handoff::Done);
         }
+        ctx.summary.payload = Some((start + 8, end.min(layer.end)));
         Ok(Handoff::Payload { transport: Transport::Udp, src_port: sport, dst_port: dport, start: start + 8, end })
     }
 }

@@ -57,6 +57,8 @@ pub struct Session {
     /// so the next page continues the packet chain instead of walking it
     /// from the first packet.
     pub(crate) seq_cursor: Mutex<Option<(u32, u32, u32)>>,
+    /// Remembered positions of the followed stream («Показать поток»).
+    pub(crate) follow_cache: Mutex<crate::follow::FollowCache>,
     pub(crate) started: Instant,
     /// Present for live captures.
     pub(crate) live: Option<LiveHandle>,
@@ -98,6 +100,7 @@ impl Session {
             search_gen: AtomicU64::new(0),
             table_orders: Mutex::new(Vec::new()),
             seq_cursor: Mutex::new(None),
+            follow_cache: Mutex::new(crate::follow::FollowCache::default()),
             started: Instant::now(),
             live,
             _temp: temp,

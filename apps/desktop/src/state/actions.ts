@@ -30,7 +30,7 @@ export async function copy(text: string): Promise<void> {
   if (await copyText(text)) useStore.getState().flash(t("status.copied"));
 }
 
-export function openStream(stream: StreamRef, tab: "streams" | "sequence" = "streams"): void {
+export function openStream(stream: StreamRef, tab: "streams" | "sequence" | "follow" = "streams"): void {
   useStore.getState().focusOnStream(stream, tab);
 }
 

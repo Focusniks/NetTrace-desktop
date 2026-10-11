@@ -396,6 +396,9 @@ impl Dissector for Tcp {
             s
         });
 
+        if captured_payload > 0 {
+            ctx.summary.payload = Some((payload_start, layer.end));
+        }
         if captured_payload == 0 || retransmitted {
             return Ok(Handoff::Done);
         }

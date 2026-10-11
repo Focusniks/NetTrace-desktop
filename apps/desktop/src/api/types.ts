@@ -182,6 +182,36 @@ export interface SequencePage {
   entries: SequenceEntry[];
 }
 
+export type FollowDirection = "both" | "c2s" | "s2c";
+
+export interface FollowChunk {
+  kind: "data" | "gap" | "notCaptured";
+  direction: "c2s" | "s2c";
+  number: number;
+  /** Position in the followed output (data bytes only). */
+  offset: number;
+  /** Position in this direction of the stream. */
+  streamOffset: number;
+  len: number;
+  /** Base64 bytes, data chunks only. */
+  data?: string;
+}
+
+export interface FollowPage {
+  offset: number;
+  nextOffset: number;
+  done: boolean;
+  /** The end of the captured data was reached while a capture runs. */
+  waiting: boolean;
+  chunks: FollowChunk[];
+}
+
+export interface StreamExport {
+  bytes: number;
+  /** Stream bytes that were not captured and are not in the file. */
+  missing: number;
+}
+
 export type AddressKind = "mac" | "ipv4" | "ipv6";
 
 export interface HostRow {

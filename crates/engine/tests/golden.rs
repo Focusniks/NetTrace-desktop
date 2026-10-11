@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use nettrace_engine::{ConversationQuery, ConversationSort, Engine, FlowQuery, FlowSort, HostQuery, HostSort, TimelineRequest};
-use nettrace_model::{ConversationKind, IndexState, StreamRef, Transport};
+use nettrace_engine::{ConversationQuery, ConversationSort, Engine, FlowQuery, FlowSort, FollowRequest, HostQuery, HostSort, TimelineRequest};
+use nettrace_model::{ConversationKind, FollowDirection, IndexState, StreamRef, Transport};
 use nettrace_testkit::{scenarios, Capture};
 use serde_json::{json, Value};
 
@@ -57,6 +57,15 @@ fn snapshot(e: &Engine) -> Value {
     let sequences: Vec<Value> = (0..tcp.total.min(20))
         .map(|id| json!(e.sequence(StreamRef { kind: Transport::Tcp, id }, 0, 5000).unwrap()))
         .collect();
+    let follow = |kind, total: u32| -> Vec<Value> {
+        (0..total.min(5))
+            .map(|id| {
+                let req = FollowRequest { stream: StreamRef { kind, id }, direction: FollowDirection::Both, offset: 0, limit: 4096 };
+                json!(e.follow_stream(&req).unwrap())
+            })
+            .collect()
+    };
+    let follow = json!({ "tcp": follow(Transport::Tcp, tcp.total), "udp": follow(Transport::Udp, udp.total) });
     let total = e.session().unwrap().progress().packets;
     let details: Vec<Value> = (1..=total.min(25)).map(|n| json!(e.packet_detail(n).unwrap())).collect();
     json!({
@@ -75,7 +84,58 @@ fn snapshot(e: &Engine) -> Value {
         "timeline": e.timeline(&TimelineRequest { start: None, end: None, buckets: 100, max_events: 20_000 }).unwrap(),
         "indicators": unordered(json!(e.indicators().unwrap())),
         "hierarchy": e.protocol_hierarchy().unwrap(),
+        "follow": follow,
     })
+}
+
+/// JSON pointers where `a` and `b` differ (added, removed or changed values).
+fn diff(a: &Value, b: &Value, path: &mut String, out: &mut Vec<String>) {
+    match (a, b) {
+        (Value::Object(x), Value::Object(y)) => {
+            let keys: std::collections::BTreeSet<&String> = x.keys().chain(y.keys()).collect();
+            for k in keys {
+                let len = path.len();
+                path.push('/');
+                path.push_str(k);
+                diff(x.get(k).unwrap_or(&Value::Null), y.get(k).unwrap_or(&Value::Null), path, out);
+                path.truncate(len);
+            }
+        }
+        (Value::Array(x), Value::Array(y)) => {
+            for i in 0..x.len().max(y.len()) {
+                let len = path.len();
+                path.push_str(&format!("/{i}"));
+                diff(x.get(i).unwrap_or(&Value::Null), y.get(i).unwrap_or(&Value::Null), path, out);
+                path.truncate(len);
+            }
+        }
+        _ if a != b => out.push(path.clone()),
+        _ => {}
+    }
+}
+
+/// Differences grouped by pattern (array indices as `*`), so a re-bless can
+/// be checked to change only what was intended.
+fn diff_report(old: &Value, new: &Value) -> String {
+    let mut paths = Vec::new();
+    diff(old, new, &mut String::new(), &mut paths);
+    let mut patterns: std::collections::BTreeMap<String, usize> = Default::default();
+    for p in &paths {
+        let pattern: Vec<&str> = p.split('/').map(|s| if s.parse::<usize>().is_ok() { "*" } else { s }).collect();
+        *patterns.entry(pattern.join("/")).or_default() += 1;
+    }
+    let mut out: Vec<String> = patterns.iter().map(|(p, n)| format!("  {n:>6} × {p}")).collect();
+    out.push(format!("  first differences: {:?}", &paths[..paths.len().min(10)]));
+    out.join("\n")
+}
+
+#[test]
+fn diff_report_names_the_changed_paths() {
+    let old = json!({"a": [{"x": 1}, {"x": 2}], "b": 1});
+    let new = json!({"a": [{"x": 1}, {"x": 3, "y": 0}], "b": 1});
+    let report = diff_report(&old, &new);
+    assert!(report.contains("1 × /a/*/x") && report.contains("1 × /a/*/y"), "{report}");
+    assert!(!report.contains("/b"));
 }
 
 fn check(name: &str, cap: Capture) {
@@ -87,6 +147,10 @@ fn check(name: &str, cap: Capture) {
     got["summary"]["info"]["path"] = Value::Null;
     let golden: PathBuf = [env!("CARGO_MANIFEST_DIR"), "tests", "golden", &format!("{name}.json")].iter().collect();
     if std::env::var_os("NETTRACE_BLESS").is_some() {
+        if let Ok(old) = std::fs::read_to_string(&golden) {
+            let old: Value = serde_json::from_str(&old).unwrap();
+            println!("{name}: changes against the previous golden:\n{}", diff_report(&old, &got));
+        }
         std::fs::create_dir_all(golden.parent().unwrap()).unwrap();
         // Compact JSON, one key per line: small files, diffs that name the query.
         let lines: Vec<String> = got.as_object().unwrap().iter().map(|(k, v)| format!("{}: {v}", json!(k))).collect();
@@ -94,9 +158,10 @@ fn check(name: &str, cap: Capture) {
         return;
     }
     let want: Value = serde_json::from_str(&std::fs::read_to_string(&golden).expect("golden missing: run with NETTRACE_BLESS=1")).unwrap();
-    for (key, value) in want.as_object().unwrap() {
-        assert!(got[key] == *value, "{name}: `{key}` differs from the golden snapshot");
-    }
+    // Keys the golden does not have yet (new queries) appear only after a bless.
+    let got_known: serde_json::Map<String, Value> = want.as_object().unwrap().keys().map(|k| (k.clone(), got[k].clone())).collect();
+    let got_known = Value::Object(got_known);
+    assert!(got_known == want, "{name} differs from the golden snapshot:\n{}", diff_report(&want, &got_known));
 }
 
 #[test]

@@ -5,6 +5,7 @@ import { useStore, type DockTab } from "../../state/store";
 import { Icon } from "../common/Icon";
 import { Splitter } from "../common/Splitter";
 import { ConversationsPanel } from "../tools/ConversationsPanel";
+import { FollowPanel } from "../tools/FollowPanel";
 import { HostsPanel } from "../tools/HostsPanel";
 import { IndicatorsPanel } from "../tools/IndicatorsPanel";
 import { SequencePanel } from "../tools/SequencePanel";
@@ -15,6 +16,7 @@ import { TimelinePanel } from "../tools/TimelinePanel";
 const TABS: { id: DockTab; label: MessageKey }[] = [
   { id: "streams", label: "dock.streams" },
   { id: "sequence", label: "dock.sequence" },
+  { id: "follow", label: "dock.follow" },
   { id: "hosts", label: "dock.hosts" },
   { id: "conversations", label: "dock.conversations" },
   { id: "statistics", label: "dock.statistics" },
@@ -28,6 +30,8 @@ function Body({ tab }: { tab: DockTab }) {
       return <StreamsPanel />;
     case "sequence":
       return <SequencePanel />;
+    case "follow":
+      return <FollowPanel />;
     case "hosts":
       return <HostsPanel />;
     case "conversations":

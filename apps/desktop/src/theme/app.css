@@ -305,6 +305,14 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .seq-label .badge { margin-left: 4px; }
 .seq-meta { padding: 0 6px; font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .seq-num { padding: 0 6px; color: var(--text-faint); font-family: var(--font-mono); font-size: 11px; }
+.follow-body { font-family: var(--font-mono); font-size: 12px; user-select: text; }
+.follow-line { height: 18px; line-height: 18px; padding: 0 8px; white-space: pre; overflow: hidden; tab-size: 4; cursor: default; }
+/* Server lines are indented: the direction is not told by colour alone. */
+.follow-line.s2c { padding-left: 24px; }
+.follow-line.c2s { color: var(--c2s); background: color-mix(in srgb, var(--c2s) 7%, transparent); }
+.follow-line.s2c { color: var(--s2c); background: color-mix(in srgb, var(--s2c) 7%, transparent); }
+.follow-line:hover { background: var(--bg-hover); }
+.follow-hole { color: var(--warn); font-family: var(--font-ui); font-style: italic; user-select: none; }
 
 /* timeline */
 .timeline { display: flex; flex-direction: column; min-height: 0; flex: 1; }

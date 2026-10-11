@@ -17,6 +17,8 @@ import type {
   FlowPage,
   FlowQuery,
   FlowSummary,
+  FollowDirection,
+  FollowPage,
   HostPage,
   HostQuery,
   IndexProgress,
@@ -30,6 +32,7 @@ import type {
   SearchQuery,
   SequencePage,
   SortSpec,
+  StreamExport,
   StreamRef,
   Timeline,
   ViewInfo,
@@ -96,6 +99,8 @@ export const api = {
   flow: (stream: StreamRef) => call<FlowSummary>("get_flow", { stream }),
   sequence: (stream: StreamRef, offset: number, limit: number) =>
     call<SequencePage>("get_sequence", { stream, offset, limit }),
+  followStream: (stream: StreamRef, direction: FollowDirection, offset: number, limit: number) =>
+    call<FollowPage>("follow_stream", { request: { stream, direction, offset, limit } }),
   hostsPage: (query: HostQuery) => call<HostPage>("get_hosts_page", { query }),
   conversationsPage: (query: ConversationQuery) => call<ConversationPage>("get_conversations_page", { query }),
   protocolHierarchy: () => call<ProtocolNode[]>("get_protocol_hierarchy"),
@@ -109,6 +114,9 @@ export const api = {
   /** Backend shows the save dialog itself; resolves to null when cancelled. */
   exportView: (viewId: number, defaultName: string, title: string) =>
     call<number | null>("export_view", { viewId, defaultName, title }),
+  /** Saves the stream payload as raw bytes; resolves to null when cancelled. */
+  exportStream: (stream: StreamRef, direction: FollowDirection, defaultName: string, title: string) =>
+    call<StreamExport | null>("export_stream", { stream, direction, defaultName, title }),
 };
 
 /** Subscribes to indexing progress (IPC events in Tauri, polling via the dev bridge). */

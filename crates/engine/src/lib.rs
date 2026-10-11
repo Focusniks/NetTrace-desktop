@@ -202,6 +202,20 @@ impl Engine {
         }
     }
 
+    /// Closes the capture before the process exits and waits (up to
+    /// `timeout`) for its threads to let go of it, so a live capture's
+    /// temporary file is deleted now rather than by the next day's cleanup.
+    pub fn shutdown(&self, timeout: std::time::Duration) {
+        let Some(session) = self.current.write().take() else { return };
+        session.cancel();
+        let deadline = Instant::now() + timeout;
+        session.wait_indexed(timeout);
+        // The indexer releases its reference right after the final progress.
+        while Arc::strong_count(&session) > 1 && Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+
     pub fn session(&self) -> Result<Arc<Session>> {
         self.current.read().clone().ok_or_else(EngineError::no_capture)
     }

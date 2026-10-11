@@ -37,6 +37,8 @@ jobs:
   preflight:
     name: Preflight
     runs-on: ubuntu-latest
+    # The signing secrets live in this environment, which only `v*` tags can use.
+    environment: release
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -133,6 +135,7 @@ jobs:
     name: Sign and publish
     needs: build
     runs-on: ubuntu-latest
+    environment: release
     permissions:
       contents: write
     env:

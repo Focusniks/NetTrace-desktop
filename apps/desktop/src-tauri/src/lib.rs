@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use commands::AppState;
 use nettrace_engine::Engine;
+use tauri::{Manager, RunEvent};
 
 /// First command-line argument that points to an existing file (file association / "Open with").
 fn file_from_args() -> Option<PathBuf> {
@@ -47,6 +48,12 @@ pub fn run() {
             commands::search,
             commands::export_view,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running the application");
+        .build(tauri::generate_context!())
+        .expect("error while building the application")
+        .run(|app, event| {
+            if let RunEvent::Exit = event {
+                // Stop a live capture and delete its temporary file.
+                app.state::<AppState>().engine.shutdown(std::time::Duration::from_secs(3));
+            }
+        });
 }

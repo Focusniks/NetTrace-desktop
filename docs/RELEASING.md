@@ -63,9 +63,11 @@ NetTrace распространяется через [GitHub Releases](https://g
 - Пароль: сгенерирован в `%USERPROFILE%\.tauri\nettrace-updater.password.txt`.
   Перенесите его в менеджер паролей и удалите этот файл: ключ зашифрован
   паролем, и хранить их рядом — всё равно что не шифровать.
-- В GitHub: Settings → Secrets and variables → Actions —
+- В GitHub: Settings → Environments → `release` → Environment secrets —
   `TAURI_SIGNING_PRIVATE_KEY` (содержимое файла ключа) и
-  `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
+  `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. Окружение `release` доступно только
+  запускам для тегов `v*`, поэтому workflow из другой ветки секретов не получит.
+  Секретов с этими именами на уровне репозитория быть не должно.
 
 **Сохраните ключ и пароль в надёжном месте (менеджер паролей, офлайн-копия).**
 Если ключ потерян, уже установленные копии больше не смогут обновиться:
@@ -83,8 +85,8 @@ NetTrace распространяется через [GitHub Releases](https://g
 Рекомендуемые настройки репозитория (Settings):
 - Rules → Rulesets: защитить теги `v*` от удаления и перезаписи;
 - Code security: включить Secret scanning и Push protection;
-- по желанию — перенести секреты подписи в Environment `release` с
-  обязательным подтверждением (тогда каждый релиз нужно одобрить кнопкой).
+- по желанию — включить в Environment `release` обязательное подтверждение
+  (тогда каждый релиз нужно одобрить кнопкой).
 
 ## Установщик
 

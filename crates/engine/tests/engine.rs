@@ -567,6 +567,21 @@ fn live_capture_records_and_indexes_in_real_time() {
 }
 
 #[test]
+fn shutdown_removes_the_live_capture_file() {
+    use nettrace_live::ReplaySource;
+    use nettrace_packet::LinkType;
+
+    let e = Engine::new();
+    let info = e
+        .start_capture_with(Box::new(ReplaySource::new(LinkType::Ethernet, Vec::new(), Duration::ZERO)), "idle0", Arc::new(|_| {}))
+        .unwrap();
+    let temp = PathBuf::from(&info.path);
+    assert!(temp.exists());
+    e.shutdown(Duration::from_secs(5));
+    assert!(!temp.exists(), "temporary capture file must be deleted on shutdown");
+}
+
+#[test]
 fn stopping_a_quiet_capture_finishes_indexing() {
     use nettrace_live::ReplaySource;
     use nettrace_packet::LinkType;

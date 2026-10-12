@@ -1,0 +1,46 @@
+# Боковое меню сайта документации. Порядок здесь задаёт и ссылки «назад / далее».
+- title: Начало
+  items:
+    - { title: Обзор, url: / }
+    - { title: Установка и обновление, url: /install.html }
+    - { title: Быстрый старт, url: /quick-start.html }
+
+- title: Работа с захватом
+  items:
+    - { title: Окно программы, url: /interface.html }
+    - { title: Файлы захвата, url: /files.html }
+    - { title: Живой захват, url: /capture.html }
+    - { title: Список пакетов, url: /packet-list.html }
+    - { title: Детали и байты пакета, url: /packet-details.html }
+    - { title: Поиск, url: /search.html }
+
+- title: Фильтры
+  items:
+    - { title: Фильтры отображения, url: /filters.html }
+    - { title: Готовые фильтры, url: /filter-recipes.html }
+    - { title: Справочник полей, url: /filter-fields.html }
+
+- title: Анализ
+  items:
+    - { title: Потоки и TCP-анализ, url: /streams.html }
+    - { title: Содержимое потока, url: /follow.html }
+    - { title: Диаграмма последовательности, url: /sequence.html }
+    - { title: Узлы и соединения, url: /hosts.html }
+    - { title: Статистика, url: /statistics.html }
+    - { title: Временная шкала, url: /timeline.html }
+    - { title: Индикаторы, url: /indicators.html }
+
+- title: Справка
+  items:
+    - { title: Протоколы, url: /protocols.html }
+    - { title: Раскраска и колонки, url: /appearance.html }
+    - { title: Сочетания клавиш, url: /shortcuts.html }
+    - { title: Пределы и производительность, url: /limits.html }
+    - { title: Безопасность и приватность, url: /privacy.html }
+    - { title: Решение проблем, url: /troubleshooting.html }
+
+- title: Разработчикам
+  items:
+    - { title: Сборка из исходников, url: /build.html }
+    - { title: Архитектура, url: /ARCHITECTURE.html }
+    - { title: Выпуск версий, url: /RELEASING.html }

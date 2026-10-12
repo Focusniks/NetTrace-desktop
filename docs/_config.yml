@@ -1,0 +1,26 @@
+# Документация NetTrace: https://focusniks.github.io/NetTrace-desktop/
+# Собирается GitHub Pages (Jekyll) из каталога docs/ ветки main, без сторонних тем.
+title: NetTrace
+description: Документация NetTrace — анализатора сетевого трафика для PCAP/PCAPNG и живого захвата.
+lang: ru
+url: https://focusniks.github.io
+baseurl: /NetTrace-desktop
+repo: https://github.com/Focusniks/NetTrace-desktop
+
+markdown: kramdown
+kramdown:
+  input: GFM
+  hard_wrap: false
+  syntax_highlighter_opts:
+    disable: true
+
+# Заголовок страниц без front matter (ARCHITECTURE.md, RELEASING.md) берётся
+# из первого заголовка, а сам заголовок убирается из текста: его выводит шаблон.
+titles_from_headings:
+  enabled: true
+  strip_title: true
+  collections: false
+
+relative_links:
+  enabled: true
+  collections: false

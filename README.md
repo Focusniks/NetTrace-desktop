@@ -5,6 +5,9 @@
 диаграмма последовательности, узлы, соединения, статистика, временная шкала.
 Приложение показывает факты и не делает выводов об инцидентах.
 
+**Документация: [focusniks.github.io/NetTrace-desktop](https://focusniks.github.io/NetTrace-desktop/)** — установка,
+фильтры, потоки, статистика, решение проблем.
+
 Стек: Rust (ядро) · Tauri 2 (оболочка) · React + TypeScript (UI). Архитектура — в
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 

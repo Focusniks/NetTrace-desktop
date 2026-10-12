@@ -39,6 +39,25 @@
       wrap.appendChild(t);
     });
 
+    // ---- A list of bold links with descriptions becomes a grid of cards ------
+    $$("ul", doc).forEach(function (ul) {
+      var items = $$("li", ul);
+      var ok = items.length >= 3 && items.every(function (li) {
+        var a = li.firstElementChild;
+        return a && a.tagName === "A" && a.firstElementChild && a.firstElementChild.tagName === "STRONG" && li.parentNode === ul;
+      });
+      if (!ok) return;
+      ul.className = "cards";
+      items.forEach(function (li) {
+        var a = li.firstElementChild;
+        var text = li.textContent.slice(a.textContent.length).replace(/^\s*[—-]\s*/, "");
+        var span = document.createElement("span");
+        span.textContent = text.charAt(0).toUpperCase() + text.slice(1);
+        while (a.nextSibling) li.removeChild(a.nextSibling);
+        a.appendChild(span);
+      });
+    });
+
     // ---- Notes: warnings get their own colour ------------------------------
     $$("blockquote", doc).forEach(function (b) {
       var s = $("strong", b);

@@ -213,9 +213,25 @@
     return html;
   }
 
+  // Russian words are matched by their stem, so any grammatical form is found.
+  function terms(q) {
+    return norm(q).split(/\s+/).filter(Boolean).map(function (w) {
+      if (/^[а-я]{7,}$/.test(w)) return w.slice(0, -2);
+      if (/^[а-я]{5,6}$/.test(w)) return w.slice(0, -1);
+      return w;
+    });
+  }
+
+  function count(text, w) {
+    var n = 0;
+    for (var i = text.indexOf(w); i >= 0 && n < 5; i = text.indexOf(w, i + w.length)) n++;
+    return n;
+  }
+
   function search(q) {
-    var words = norm(q).split(/\s+/).filter(Boolean);
+    var words = terms(q);
     if (!words.length) return [];
+    var phrase = norm(q).trim();
     var res = [];
     index.forEach(function (s) {
       var score = 0;
@@ -223,10 +239,12 @@
         var w = words[i];
         var inTitle = s.nTitle.indexOf(w) >= 0;
         var inPage = s.nPage.indexOf(w) >= 0;
-        var inText = s.nText.indexOf(w) >= 0;
+        var inText = count(s.nText, w);
         if (!inTitle && !inPage && !inText) return;
-        score += (inTitle ? 12 : 0) + (inPage ? 4 : 0) + (inText ? 1 : 0);
+        score += (inTitle ? 12 : 0) + (inPage ? 3 : 0) + inText;
       }
+      // The words next to each other count for more than the words apart.
+      if (words.length > 1) score += (s.nTitle.indexOf(phrase) >= 0 ? 20 : 0) + (s.nText.indexOf(phrase) >= 0 ? 6 : 0);
       res.push({ s: s, score: score });
     });
     res.sort(function (a, b) { return b.score - a.score; });
@@ -234,7 +252,7 @@
   }
 
   function render(q) {
-    var words = norm(q).split(/\s+/).filter(Boolean);
+    var words = terms(q);
     var res = search(q);
     active = -1;
     if (!words.length) { box.hidden = true; return; }

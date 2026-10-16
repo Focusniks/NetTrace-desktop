@@ -57,7 +57,7 @@ parking_lot = "0.12"
 rayon = "1"
 hashbrown = "0.17"
 getrandom = "0.4"
-base64 = "0.22"
+base64 = "0.23"
 tempfile = "3"
 
 [workspace.lints.rust]
